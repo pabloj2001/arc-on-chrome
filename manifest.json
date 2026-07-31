@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Arc Search Bar",
+  "version": "1.1.0",
+  "description": "Replicates Arc's command/search bar. Search, edit the current URL, run slash-commands, and jump to favorites — all from a floating bar on any site.",
+  "permissions": ["commands", "tabs", "storage", "favicon"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["_favicon/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "toggle-search-bar": {
+      "suggested_key": {
+        "default": "Ctrl+T",
+        "mac": "Command+T"
+      },
+      "description": "Open the Arc-style search bar (search in a new tab)"
+    },
+    "open-url-bar": {
+      "suggested_key": {
+        "default": "Ctrl+L",
+        "mac": "Command+L"
+      },
+      "description": "Open the bar to edit the current tab's URL"
+    }
+  }
+}
