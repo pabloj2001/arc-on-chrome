@@ -22,14 +22,66 @@ chrome.commands.onCommand.addListener((command) => {
 
 // Opens a query/favorite in a new tab. Done from the background so it works
 // even if the originating page blocks window.open.
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return;
-  if (message.type === "ARC_SEARCH_SUBMIT" && message.url) {
-    chrome.tabs.create({ url: message.url });
-  } else if (message.type === "ARC_OPEN_FAVORITE" && message.url) {
-    focusOrCreateTab(message.url);
+  switch (message.type) {
+    case "ARC_SEARCH_SUBMIT":
+      if (message.url) chrome.tabs.create({ url: message.url });
+      break;
+    case "ARC_OPEN_FAVORITE":
+      if (message.url) focusOrCreateTab(message.url);
+      break;
+    case "ARC_ACTIVATE_TAB":
+      if (message.tabId != null) {
+        chrome.tabs.update(message.tabId, { active: true });
+        if (message.windowId != null) {
+          chrome.windows.update(message.windowId, { focused: true });
+        }
+      }
+      break;
+    case "ARC_GET_INDEX":
+      getIndex(sender, sendResponse);
+      return true; // keep the message channel open for the async response
   }
 });
+
+const WEB_URL = /^https?:\/\//i;
+
+// Builds the small index the bar searches: currently-open tabs plus the last
+// 7 days of history (capped). Only http(s) pages are included.
+function getIndex(sender, sendResponse) {
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  chrome.tabs.query({}, (tabs) => {
+    const openTabs = tabs
+      .filter((t) => t.url && WEB_URL.test(t.url))
+      .map((t) => ({
+        tabId: t.id,
+        windowId: t.windowId,
+        title: t.title || t.url,
+        url: t.url,
+        lastAccessed: t.lastAccessed || 0,
+      }))
+      // Most recently used tabs first (lastAccessed is when a tab was last active).
+      .sort((a, b) => b.lastAccessed - a.lastAccessed);
+    chrome.history.search(
+      { text: "", startTime: weekAgo, maxResults: 500 },
+      (items) => {
+        const history = (items || [])
+          .filter((h) => h.url && WEB_URL.test(h.url))
+          .map((h) => ({
+            title: h.title || h.url,
+            url: h.url,
+            lastVisitTime: h.lastVisitTime || 0,
+          }));
+        sendResponse({
+          currentTabId: sender.tab && sender.tab.id,
+          tabs: openTabs,
+          history,
+        });
+      }
+    );
+  });
+}
 
 // Parses a URL into the parts we compare on: host without a leading "www.",
 // path without trailing slashes, and the query string.

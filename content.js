@@ -9,6 +9,7 @@
   const FAV_COUNT = 8;
   const STORAGE_KEY = "arcFavorites";
   const SHORTCUTS_KEY = "arcShortcuts";
+  const MAX_RESULTS = 10;
 
   let host = null;
   let overlay = null;
@@ -16,6 +17,7 @@
   let input = null;
   let pillEl = null;
   let favRow = null;
+  let resultsEl = null;
   let statusEl = null;
   let isOpen = false;
   let mode = "search"; // "search" | "url"
@@ -23,6 +25,11 @@
   let shortcuts = {}; // alias -> url template (with %s)
   let activeShortcut = null; // alias currently shown as a pill
   let dismissedAlias = null; // alias the user backspaced out of, to avoid re-arming
+  let openTabs = []; // index of open tabs {tabId, windowId, title, url}
+  let historyItems = []; // 7-day history {title, url, lastVisitTime}
+  let currentTabId = null; // the tab hosting this bar (excluded from results)
+  let results = []; // current visible result rows
+  let activeIndex = -1; // highlighted result, -1 = none (typing/search)
 
   // ---- Favorites / shortcuts persistence -------------------------------------
 
@@ -267,6 +274,30 @@
     status("");
   }
 
+  // The best alias a prefix could autocomplete to: shortest match wins, then
+  // alphabetical. Excludes an exact match (handled separately).
+  function bestAliasByPrefix(token) {
+    const t = token.toLowerCase();
+    const cands = Object.keys(shortcuts).filter(
+      (a) => a !== t && a.startsWith(t)
+    );
+    if (!cands.length) return null;
+    cands.sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
+    return cands[0];
+  }
+
+  // Which alias pressing space on this first token should arm: an exact alias,
+  // or (once 3+ chars are typed) the most likely prefix completion.
+  function aliasForSpace(token) {
+    if (!token) return null;
+    if (shortcuts[token] && token !== dismissedAlias) return token;
+    if (token.length >= 3) {
+      const best = bestAliasByPrefix(token);
+      if (best && best !== dismissedAlias) return best;
+    }
+    return null;
+  }
+
   // Remove the pill and restore the plain alias word so it can be used literally.
   // `dismissedAlias` prevents the next space from immediately re-arming the pill.
   function dismissShortcutPill() {
@@ -278,6 +309,213 @@
     const n = input.value.length;
     input.setSelectionRange(n, n);
     input.focus();
+    activeIndex = -1;
+    refreshResults();
+  }
+
+  // ---- Open tabs + history results -------------------------------------------
+
+  // Query params that only affect tracking/analytics and shouldn't make two
+  // otherwise-identical URLs count as different pages.
+  const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|gclsrc$|dclid$|msclkid$|mc_eid$|mc_cid$|igshid$|ref$|ref_src$|ref_url$|spm$|yclid$|_hsenc$|_hsmi$|_openstat$|si$)/i;
+
+  // Canonical key for de-duplication: host without "www.", path without a
+  // trailing slash, and the query with tracking params dropped and the rest
+  // sorted so param order doesn't matter. Scheme and hash are ignored.
+  function canon(u) {
+    try {
+      const x = new URL(u);
+      const kept = [];
+      for (const [k, v] of new URLSearchParams(x.search)) {
+        if (!TRACKING_PARAM.test(k)) kept.push([k, v]);
+      }
+      kept.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      const qs = kept.length
+        ? "?" + kept.map(([k, v]) => `${k}=${v}`).join("&")
+        : "";
+      return (
+        x.host.replace(/^www\./i, "") +
+        x.pathname.replace(/\/+$/, "") +
+        qs
+      ).toLowerCase();
+    } catch (_) {
+      return (u || "").toLowerCase();
+    }
+  }
+
+  function matchesQuery(item, tokens) {
+    const hay = `${item.title || ""} ${item.url || ""}`.toLowerCase();
+    return tokens.every((t) => hay.includes(t));
+  }
+
+  function hostPath(u) {
+    try {
+      const x = new URL(u);
+      return {
+        host: x.host.replace(/^www\./i, "").toLowerCase(),
+        path: x.pathname.replace(/\/+$/, ""),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // The host/path an active shortcut's template resolves to (the part before %s),
+  // used to filter results to that destination (e.g. "https://go/%s" -> go, "").
+  function templateBase(template) {
+    let prefix = (template || "").split("%s")[0];
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(prefix)) prefix = "https://" + prefix;
+    return hostPath(prefix);
+  }
+
+  // True if a URL lives under a shortcut's base host + path prefix.
+  function underBase(u, base) {
+    const hp = hostPath(u);
+    if (!hp || hp.host !== base.host) return false;
+    if (base.path === "") return true;
+    return hp.path === base.path || hp.path.startsWith(base.path + "/");
+  }
+
+  // No shortcut: empty query -> other open tabs; typing -> title/url matches in
+  // open tabs then history. With a shortcut pill active: restrict to tabs/history
+  // under the shortcut's destination URL (and further narrow by the typed query).
+  function computeResults() {
+    if (mode !== "search") return [];
+    const raw = input ? input.value : "";
+    if (!activeShortcut && raw.trim().startsWith("/")) return [];
+
+    let base = null;
+    if (activeShortcut) {
+      base = templateBase(shortcuts[activeShortcut]);
+      if (!base) return [];
+    }
+    const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const out = [];
+    const seen = new Set();
+
+    for (const t of openTabs) {
+      if (t.tabId === currentTabId) continue;
+      if (base && !underBase(t.url, base)) continue;
+      if (tokens.length && !matchesQuery(t, tokens)) continue;
+      const c = canon(t.url);
+      if (seen.has(c)) continue;
+      seen.add(c);
+      out.push({ type: "tab", title: t.title, url: t.url, tabId: t.tabId, windowId: t.windowId });
+      if (out.length >= MAX_RESULTS) return out;
+    }
+
+    // Include history when there's a query, or a shortcut base to browse under.
+    if (tokens.length || base) {
+      for (const h of historyItems) {
+        const c = canon(h.url);
+        if (seen.has(c)) continue;
+        if (base && !underBase(h.url, base)) continue;
+        if (tokens.length && !matchesQuery(h, tokens)) continue;
+        seen.add(c);
+        out.push({ type: "history", title: h.title, url: h.url });
+        if (out.length >= MAX_RESULTS) break;
+      }
+    }
+    return out;
+  }
+
+  function refreshResults() {
+    results = computeResults();
+    if (activeIndex >= results.length) activeIndex = results.length - 1;
+    renderResults();
+  }
+
+  function renderResults() {
+    if (!resultsEl) return;
+    resultsEl.textContent = "";
+    if (!results.length) {
+      resultsEl.style.display = "none";
+      return;
+    }
+    resultsEl.style.display = "block";
+    results.forEach((r, i) => {
+      const row = document.createElement("div");
+      row.className = "result" + (i === activeIndex ? " active" : "");
+
+      const img = document.createElement("img");
+      img.src = faviconUrl(r.url);
+      img.alt = "";
+      img.addEventListener("error", () => {
+        img.style.visibility = "hidden";
+      });
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = r.title || r.url;
+      const url = document.createElement("div");
+      url.className = "url";
+      url.textContent = r.url;
+      meta.appendChild(title);
+      meta.appendChild(url);
+
+      const tag = document.createElement("div");
+      tag.className = "tag";
+      tag.textContent = r.type === "tab" ? "Open tab" : "History";
+
+      row.appendChild(img);
+      row.appendChild(meta);
+      row.appendChild(tag);
+      row.addEventListener("click", () => chooseResult(i));
+      row.addEventListener("mousemove", () => setActive(i, false));
+      resultsEl.appendChild(row);
+    });
+  }
+
+  function setActive(i, scroll) {
+    activeIndex = i;
+    if (!resultsEl) return;
+    const rows = resultsEl.children;
+    for (let k = 0; k < rows.length; k++) {
+      rows[k].classList.toggle("active", k === activeIndex);
+    }
+    if (scroll && activeIndex >= 0 && rows[activeIndex]) {
+      rows[activeIndex].scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function moveSelection(dir) {
+    if (!results.length) return;
+    let next = activeIndex + dir;
+    if (next < -1) next = -1;
+    if (next > results.length - 1) next = results.length - 1;
+    setActive(next, true);
+  }
+
+  function selectFirstResult() {
+    if (!results.length) return;
+    setActive(activeIndex < 0 ? 0 : Math.min(activeIndex + 1, results.length - 1), true);
+  }
+
+  function chooseResult(i) {
+    const r = results[i];
+    if (!r) return;
+    close();
+    if (r.type === "tab") {
+      chrome.runtime.sendMessage({
+        type: "ARC_ACTIVATE_TAB",
+        tabId: r.tabId,
+        windowId: r.windowId,
+      });
+    } else {
+      chrome.runtime.sendMessage({ type: "ARC_OPEN_FAVORITE", url: r.url });
+    }
+  }
+
+  function loadIndex() {
+    chrome.runtime.sendMessage({ type: "ARC_GET_INDEX" }, (res) => {
+      if (chrome.runtime.lastError || !res) return;
+      openTabs = res.tabs || [];
+      historyItems = res.history || [];
+      currentTabId = res.currentTabId != null ? res.currentTabId : null;
+      if (isOpen) refreshResults();
+    });
   }
 
   // ---- Key handling ----------------------------------------------------------
@@ -319,13 +557,34 @@
       return;
     }
 
+    // Arrow keys navigate the results list; Tab jumps to the first result.
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      moveSelection(1);
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      moveSelection(-1);
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      selectFirstResult();
+      return;
+    }
+
     e.stopImmediatePropagation();
     if (e.key === "Escape") {
       e.preventDefault();
       close();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      submit();
+      if (activeIndex >= 0 && results[activeIndex]) chooseResult(activeIndex);
+      else submit();
     } else if (
       e.key === "Backspace" &&
       activeShortcut &&
@@ -416,7 +675,7 @@
       animation: arc-fade 120ms ease-out;
     }
     .stack {
-      margin-top: 16vh; width: min(680px, 90vw);
+      margin-top: 22vh; width: min(680px, 90vw);
       display: flex; flex-direction: column; align-items: stretch; gap: 12px;
       animation: arc-pop 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
     }
@@ -461,6 +720,33 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
     .fave.empty .badge { display: none; }
+    .results {
+      background: rgba(250, 250, 252, 0.98); border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06);
+      padding: 6px; max-height: 248px; overflow-y: auto;
+    }
+    .result {
+      display: flex; align-items: center; gap: 12px;
+      padding: 9px 12px; border-radius: 10px; cursor: pointer;
+    }
+    .result.active { background: rgba(75, 108, 255, 0.16); }
+    .result img { width: 20px; height: 20px; border-radius: 5px; flex: 0 0 auto; }
+    .result .meta { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+    .result .title {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px; line-height: 19px; color: #1c1c1e;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .result .url {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px; line-height: 15px; color: #8a8a90;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .result .tag {
+      flex: 0 0 auto; margin-left: 8px; padding: 2px 8px; border-radius: 6px;
+      background: rgba(0,0,0,0.06); color: #6a6a70; font-size: 11px; font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
     .status {
       min-height: 16px; text-align: center; white-space: pre-line;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -478,6 +764,11 @@
       input::placeholder { color: #8a8a90; }
       .fave { background: rgba(44, 44, 48, 0.98); color: #c7c7cc; }
       .fave.empty { background: rgba(60,60,64,0.6); }
+      .results { background: rgba(30, 30, 33, 0.98); }
+      .result.active { background: rgba(75, 108, 255, 0.28); }
+      .result .title { color: #f2f2f7; }
+      .result .url { color: #9a9aa2; }
+      .result .tag { background: rgba(255,255,255,0.1); color: #c7c7cc; }
     }
   `;
 
@@ -529,6 +820,10 @@
     favRow = document.createElement("div");
     favRow.className = "faves";
 
+    resultsEl = document.createElement("div");
+    resultsEl.className = "results";
+    resultsEl.style.display = "none";
+
     statusEl = document.createElement("div");
     statusEl.className = "status";
 
@@ -537,6 +832,7 @@
     bar.appendChild(input);
     stack.appendChild(bar);
     stack.appendChild(favRow);
+    stack.appendChild(resultsEl);
     stack.appendChild(statusEl);
     overlay.appendChild(stack);
     shadow.appendChild(style);
@@ -545,6 +841,7 @@
 
     applyMode();
     renderFavorites();
+    loadIndex();
 
     // Clicking the backdrop closes; clicking anything else inside keeps input
     // focus (so favorite buttons work without the blur-close firing first).
@@ -559,19 +856,33 @@
     input.addEventListener("blur", onFocusOut);
     input.addEventListener("input", () => {
       const v = input.value;
-      // Arm a shortcut pill when the first typed token is a registered alias
-      // followed by a space (matching custom-search-engine behavior).
+      // Arm a shortcut pill when the first token (exact alias, or a 3+ char
+      // prefix of one) is followed by a space — space autocompletes the alias.
       if (!activeShortcut) {
         const firstTok = v.split(/\s/)[0];
         if (dismissedAlias && firstTok !== dismissedAlias) dismissedAlias = null;
         const m = v.match(/^(\S+)\s([\s\S]*)$/);
-        if (m && shortcuts[m[1]] && m[1] !== dismissedAlias) {
-          activateShortcut(m[1], m[2]);
-          return;
+        if (m) {
+          const alias = aliasForSpace(m[1]);
+          if (alias) {
+            activateShortcut(alias, m[2]);
+            activeIndex = -1;
+            refreshResults();
+            return;
+          }
         }
       }
-      if (!activeShortcut && v.startsWith("/")) showCommandHints(v);
-      else status("");
+      // Status line: command hints, else a "press space" alias suggestion.
+      if (!activeShortcut && v.startsWith("/")) {
+        showCommandHints(v);
+      } else if (!activeShortcut && v.length && !/\s/.test(v)) {
+        const alias = aliasForSpace(v);
+        status(alias && alias !== v ? `space → ${alias}` : "");
+      } else {
+        status("");
+      }
+      activeIndex = -1; // reset selection whenever the query changes
+      refreshResults();
     });
 
     // Reliable Escape/Enter path when nothing upstream intercepts the key.
@@ -593,6 +904,7 @@
   function applyMode() {
     activeShortcut = null;
     dismissedAlias = null;
+    activeIndex = -1;
     if (mode === "url") {
       input.value = location.href;
       renderPill();
@@ -602,6 +914,7 @@
       renderPill();
     }
     status("");
+    refreshResults();
   }
 
   // Sends a resolved URL to the right place based on the current mode.
@@ -641,8 +954,10 @@
     isOpen = false;
     activeShortcut = null;
     dismissedAlias = null;
+    results = [];
+    activeIndex = -1;
     if (host && host.parentNode) host.parentNode.removeChild(host);
-    host = overlay = stack = input = pillEl = favRow = statusEl = null;
+    host = overlay = stack = input = pillEl = favRow = resultsEl = statusEl = null;
   }
 
   function toggle(m) {

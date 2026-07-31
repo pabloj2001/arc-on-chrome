@@ -21,6 +21,11 @@ A Chrome extension that replicates Arc's floating command/search bar.
   template, then type the alias + space to turn it into a **pill** and search through it (see
   below).
 - **Slash commands** — type `/` followed by a command to run it (see below).
+- **Browse tabs & history** — under the bar, a result list shows your other open tabs. As you
+  type, it matches by title/URL across open tabs first, then your last 7 days of history.
+  Use **↑/↓** to move the selection (**Tab** jumps to the first result), and **Enter** to go —
+  switching to the tab if it's already open, otherwise opening the page. The list shows ~4 rows
+  at a time (scroll for the rest, up to 10).
 
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
 
@@ -35,6 +40,8 @@ alias becomes a pill and whatever you type next is substituted into the template
 ```
 
 - Press **space** after a registered alias to arm the pill; type your query and **Enter**.
+- While the pill is active, the result list shows your open tabs and history under the
+  shortcut's destination (e.g. the `go` pill shows `https://go/*`), narrowing as you type.
 - With the pill active and the query empty, press **Backspace** to remove the pill and get the
   plain word back (so you can use the word itself without the shortcut). The next space won't
   re-arm the same alias until you edit that first word.
@@ -102,6 +109,6 @@ recommended.
 
 ## Files
 
-- `manifest.json` — MV3 manifest, permissions (`commands`, `tabs`, `storage`, `favicon`), and command bindings.
-- `background.js` — routes the shortcuts to the page (with a mode), opens results in new tabs, and switches to an existing tab when opening a favorite that's already open.
-- `content.js` — renders the bar (isolated Shadow DOM), handles input, modes, favorites, the command registry, and dismissal.
+- `manifest.json` — MV3 manifest, permissions (`commands`, `tabs`, `storage`, `favicon`, `history`), and command bindings.
+- `background.js` — routes the shortcuts to the page (with a mode), opens results in new tabs, switches to an existing tab when opening a favorite, and serves the open-tabs + 7-day history index used by the result list.
+- `content.js` — renders the bar (isolated Shadow DOM), handles input, modes, favorites, keyword shortcuts, the tabs/history result list, the command registry, and dismissal.
