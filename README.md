@@ -49,20 +49,27 @@ alias becomes a pill and whatever you type next is substituted into the template
 - Templates without `%s` get the query appended; schemeless templates default to `https://`
   (single-label hosts like `go` use `http://`).
 
-## Favorites & commands
+## Commands
 
-While the bar is open, type a command starting with `/` and press **Enter**:
+Type **`/`** to open the command palette — a list of commands that filters as you type (each
+row shows the usage and a description). Pick one with **↑/↓ + Enter**, **Tab**, or a click
+(typing a command name + space also works, and autocompletes a prefix like `/short`).
+
+Selecting a command turns it into **pills**: the command name, then one pill per parameter.
+The active parameter's name shows as a placeholder — type its value and press **Space** or
+**Tab** to move to the next, **Shift+Tab** to go back, and **Backspace** on an empty parameter
+to step back (or exit the command). **Enter** runs it.
 
 | Command | Description |
 | --- | --- |
-| `/fave <1-8> <url>` | Save a favorite, e.g. `/fave 1 github.com` |
-| `/unfave <1-8>` | Clear a favorite |
+| `/favorite <1-8> <url>` | Save a favorite, e.g. `/favorite 1 github.com` |
+| `/unfavorite <1-8>` | Clear a favorite |
 | `/shortcut <alias> <url with %s>` | Add a keyword shortcut, e.g. `/shortcut go https://go/%s` |
 | `/unshortcut <alias>` | Remove a keyword shortcut |
 
 Favorites and shortcuts are stored with `chrome.storage.local`, so they persist across browser
 restarts and stay in sync across tabs. The favicon buttons under the bar reflect your saved
-favorites; empty slots show their number and can be clicked to pre-fill a `/fave` command.
+favorites; empty slots show their number and can be clicked to start a `/favorite` command.
 
 ### Adding new commands
 
@@ -72,11 +79,11 @@ Commands live in a small registry in `content.js`. To add one, add an entry to t
 ```js
 const COMMANDS = {
   mycmd: {
-    usage: "/mycmd <arg>",
     description: "What it does.",
+    params: [{ name: "arg" }, { name: "other" }], // each shown as a pill
     run: (args, ctx) => {
-      // args: string[] after the command name
-      // ctx: { status, setFavorite, close, clearInput }
+      // args: the param values in order
+      // ctx: { status, setFavorite, setShortcut, removeShortcut, close, clearInput }
       ctx.status("done");
     },
   },

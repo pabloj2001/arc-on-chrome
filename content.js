@@ -15,7 +15,9 @@
   let overlay = null;
   let stack = null;
   let input = null;
+  let barEl = null;
   let pillEl = null;
+  let cmdChipsEl = null;
   let favRow = null;
   let resultsEl = null;
   let statusEl = null;
@@ -24,12 +26,14 @@
   let favorites = new Array(FAV_COUNT).fill(null);
   let shortcuts = {}; // alias -> url template (with %s)
   let activeShortcut = null; // alias currently shown as a pill
-  let dismissedAlias = null; // alias the user backspaced out of, to avoid re-arming
+  let dismissedToken = null; // the typed token the user backspaced out of, to avoid re-arming
+  let shortcutTypedToken = null; // what the user actually typed before the pill armed (e.g. "data")
   let openTabs = []; // index of open tabs {tabId, windowId, title, url}
   let historyItems = []; // 7-day history {title, url, lastVisitTime}
   let currentTabId = null; // the tab hosting this bar (excluded from results)
   let results = []; // current visible result rows
   let activeIndex = -1; // highlighted result, -1 = none (typing/search)
+  let commandState = null; // active command param entry, or null
 
   // ---- Favorites / shortcuts persistence -------------------------------------
 
@@ -49,7 +53,7 @@
     if (isOpen) renderFavorites();
   });
 
-  // Keep every open tab's copy in sync (e.g. after a /fave in another tab).
+  // Keep every open tab's copy in sync (e.g. after a /favorite in another tab).
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[STORAGE_KEY]) {
@@ -149,43 +153,44 @@
   }
 
   // ---- Command system --------------------------------------------------------
-  // Add a command by adding an entry here. `run(args, ctx)` receives the
-  // whitespace-split arguments (after the command name) and a ctx of helpers.
+  // Add a command by adding an entry here: `name`, `description`, a `params`
+  // list (each shown as a pill), and `run(args, ctx)` where args are the param
+  // values in order. `usage` is derived from name + params.
   const COMMANDS = {
-    fave: {
-      usage: "/fave <1-8> <url>",
+    favorite: {
       description: "Save a favorite for quick-open (Cmd+1-8).",
+      params: [{ name: "1-8" }, { name: "url" }],
       run: (args, ctx) => {
         const idx = parseInt(args[0], 10);
         if (!idx || idx < 1 || idx > FAV_COUNT) {
-          return ctx.status(`Usage: ${COMMANDS.fave.usage}`);
+          return ctx.status(`Usage: ${usageOf("favorite")}`);
         }
         const url = normalizeUrl(args.slice(1).join(" "));
-        if (!url) return ctx.status(`Provide a URL, e.g. /fave ${idx} github.com`);
+        if (!url) return ctx.status(`Provide a URL, e.g. /favorite ${idx} github.com`);
         ctx.setFavorite(idx - 1, url);
         ctx.status(`Saved favorite ${idx} → ${url}`);
       },
     },
-    unfave: {
-      usage: "/unfave <1-8>",
+    unfavorite: {
       description: "Clear a saved favorite.",
+      params: [{ name: "1-8" }],
       run: (args, ctx) => {
         const idx = parseInt(args[0], 10);
         if (!idx || idx < 1 || idx > FAV_COUNT) {
-          return ctx.status(`Usage: ${COMMANDS.unfave.usage}`);
+          return ctx.status(`Usage: ${usageOf("unfavorite")}`);
         }
         ctx.setFavorite(idx - 1, null);
         ctx.status(`Cleared favorite ${idx}`);
       },
     },
     shortcut: {
-      usage: "/shortcut <alias> <url with %s>",
       description: "Add a keyword search, e.g. /shortcut go https://go/%s",
+      params: [{ name: "alias" }, { name: "url with %s" }],
       run: (args, ctx) => {
         const alias = (args[0] || "").trim().toLowerCase();
         const url = args.slice(1).join(" ").trim();
         if (!alias || /\s/.test(alias)) {
-          return ctx.status(`Usage: ${COMMANDS.shortcut.usage}`);
+          return ctx.status(`Usage: ${usageOf("shortcut")}`);
         }
         if (!url) {
           return ctx.status(
@@ -197,8 +202,8 @@
       },
     },
     unshortcut: {
-      usage: "/unshortcut <alias>",
       description: "Remove a keyword search.",
+      params: [{ name: "alias" }],
       run: (args, ctx) => {
         const alias = (args[0] || "").trim().toLowerCase();
         if (!alias || !shortcuts[alias]) {
@@ -209,6 +214,20 @@
       },
     },
   };
+
+  function usageOf(name) {
+    const cmd = COMMANDS[name];
+    const params = (cmd.params || []).map((p) => `<${p.name}>`).join(" ");
+    return `/${name}${params ? " " + params : ""}`;
+  }
+
+  function bestCommandByPrefix(prefix) {
+    const p = prefix.toLowerCase();
+    const cands = Object.keys(COMMANDS).filter((n) => n !== p && n.startsWith(p));
+    if (!cands.length) return null;
+    cands.sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
+    return cands[0];
+  }
 
   function commandCtx() {
     return {
@@ -241,11 +260,107 @@
     cmd.run(parts, commandCtx());
   }
 
-  function showCommandHints(value) {
-    const rest = value.slice(1).split(/\s+/)[0].toLowerCase();
-    const names = Object.keys(COMMANDS).filter((n) => n.startsWith(rest));
-    if (!names.length) return status("No matching command");
-    status(names.map((n) => `${COMMANDS[n].usage} — ${COMMANDS[n].description}`).join("\n"));
+  // ---- Command param mode (pills) --------------------------------------------
+
+  // commandState = { name, params, values, index, enteredFrom, invalid } while
+  // filling in a command's params, or null. `enteredFrom` is the text to restore
+  // if the user backspaces out.
+  function enterCommandMode(name, firstValue, enteredFrom) {
+    const cmd = COMMANDS[name];
+    if (!cmd) return;
+    if (!cmd.params || !cmd.params.length) {
+      cmd.run([], commandCtx()); // no params -> run immediately
+      input.value = "";
+      input.focus();
+      refreshResults();
+      return;
+    }
+    commandState = {
+      name,
+      params: cmd.params,
+      values: [],
+      index: 0,
+      enteredFrom: enteredFrom || "/" + name,
+      invalid: null,
+    };
+    input.value = firstValue || "";
+    status(cmd.description);
+    renderCommandChips();
+    activeIndex = -1;
+    refreshResults();
+    input.focus();
+  }
+
+  // Leaves command mode, putting `text` in the input. Refocuses so the deferred
+  // blur-close doesn't fire.
+  function exitCommandMode(text) {
+    commandState = null;
+    renderCommandChips();
+    input.value = text || "";
+    const n = input.value.length;
+    input.setSelectionRange(n, n);
+    activeIndex = -1;
+    refreshResults();
+    input.focus();
+  }
+
+  // Back out of the command to the text the user had typed (e.g. "/fav").
+  function exitToText() {
+    if (!commandState) return;
+    const text = commandState.enteredFrom || "/" + commandState.name;
+    status("");
+    exitCommandMode(text);
+  }
+
+  function advanceParam() {
+    if (!commandState) return;
+    commandState.values[commandState.index] = input.value;
+    if (commandState.index < commandState.params.length - 1) {
+      commandState.index++;
+      input.value = commandState.values[commandState.index] || "";
+      renderCommandChips();
+    }
+  }
+
+  function gotoPrevParam() {
+    if (!commandState || commandState.index === 0) return;
+    commandState.values[commandState.index] = input.value;
+    commandState.index--;
+    input.value = commandState.values[commandState.index] || "";
+    renderCommandChips();
+    const n = input.value.length;
+    input.setSelectionRange(n, n);
+  }
+
+  // Briefly outline the empty params in red without running the command.
+  function flashInvalidParams(indices) {
+    if (!commandState) return;
+    commandState.invalid = new Set(indices);
+    renderCommandChips();
+    setTimeout(() => {
+      if (commandState) {
+        commandState.invalid = null;
+        renderCommandChips();
+      }
+    }, 700);
+  }
+
+  function runCommandStructured() {
+    if (!commandState) return;
+    commandState.values[commandState.index] = input.value;
+    const missing = [];
+    commandState.params.forEach((_, i) => {
+      const v = commandState.values[i];
+      if (!v || !v.trim()) missing.push(i);
+    });
+    if (missing.length) {
+      flashInvalidParams(missing);
+      return;
+    }
+    const cmd = COMMANDS[commandState.name];
+    const args = commandState.params.map((_, i) => commandState.values[i] || "");
+    exitCommandMode(""); // keep the bar open, clear the text
+    cmd.run(args, commandCtx()); // shows a status notification
   }
 
   // ---- Shortcut pill ---------------------------------------------------------
@@ -258,15 +373,108 @@
       input.placeholder = `Search "${activeShortcut}"…`;
     } else {
       pillEl.style.display = "none";
-      input.placeholder =
-        mode === "url" ? "Edit URL or search…" : "Search or enter address…";
+      if (!commandState) {
+        input.placeholder =
+          mode === "url" ? "Edit URL or search…" : "Search or enter address…";
+      }
     }
   }
 
-  // Turn "<alias> <rest>" into a pill + query field.
-  function activateShortcut(alias, rest) {
+  // Renders the command pill followed by a pill for EVERY param: completed ones
+  // show their value, the active one is the input itself (placed inline), and
+  // upcoming ones show as faded placeholders. The input is moved into the active
+  // slot and restored to the bar when command mode ends.
+  function renderCommandChips() {
+    if (!cmdChipsEl) return;
+    // Detach the input before clearing so we don't destroy it, then re-place it.
+    if (barEl) barEl.appendChild(input);
+    cmdChipsEl.textContent = "";
+
+    if (!commandState) {
+      cmdChipsEl.style.display = "none";
+      input.classList.remove("param-active");
+      input.style.width = "";
+      renderPill();
+      return;
+    }
+    cmdChipsEl.style.display = "inline-flex";
+
+    const cp = document.createElement("span");
+    cp.className = "cmd-pill";
+    cp.textContent = "/" + commandState.name;
+    cmdChipsEl.appendChild(cp);
+
+    for (let i = 0; i < commandState.params.length; i++) {
+      const invalid = commandState.invalid && commandState.invalid.has(i);
+      if (i === commandState.index) {
+        const wrap = document.createElement("span");
+        wrap.className = "param-pill active" + (invalid ? " invalid" : "");
+        const lab = document.createElement("span");
+        lab.className = "plabel";
+        lab.textContent = commandState.params[i].name;
+        wrap.appendChild(lab);
+        input.placeholder = "";
+        input.classList.add("param-active");
+        wrap.appendChild(input);
+        cmdChipsEl.appendChild(wrap);
+        updateParamInputWidth();
+      } else {
+        const value = commandState.values[i];
+        const hasVal = value != null && value !== "";
+        const pp = document.createElement("span");
+        pp.className =
+          "param-pill" + (hasVal ? " filled" : " upcoming") + (invalid ? " invalid" : "");
+        const lab = document.createElement("span");
+        lab.className = "plabel";
+        lab.textContent = commandState.params[i].name;
+        pp.appendChild(lab);
+        if (hasVal) {
+          const val = document.createElement("span");
+          val.className = "pval";
+          val.textContent = value;
+          pp.appendChild(val);
+        }
+        pp.addEventListener("click", () => jumpToParam(i));
+        cmdChipsEl.appendChild(pp);
+      }
+    }
+    input.focus();
+  }
+
+  // Move to a specific param (e.g. clicking a pill), keeping the current value.
+  function jumpToParam(i) {
+    if (!commandState) return;
+    commandState.values[commandState.index] = input.value;
+    commandState.index = i;
+    input.value = commandState.values[i] || "";
+    renderCommandChips();
+    const n = input.value.length;
+    input.setSelectionRange(n, n);
+    input.focus();
+  }
+
+  function updateParamInputWidth() {
+    if (!input || !commandState || !barEl) return;
+    // Hug the content...
+    const chars = Math.max(input.value.length, 1) + 1;
+    input.style.width = chars + "ch";
+    // ...but never let the bar overflow: if it does, shrink the input so its
+    // text scrolls internally instead of spilling past the bar edge.
+    const overflow = barEl.scrollWidth - barEl.clientWidth;
+    if (overflow > 0) {
+      const current = input.getBoundingClientRect().width;
+      const target = Math.max(current - overflow - 2, 40);
+      input.style.width = target + "px";
+    }
+  }
+
+  // Turn "<alias> <rest>" into a pill + query field. `typedToken` is what the
+  // user actually typed (may be a prefix that autocompleted), so backspacing the
+  // pill can restore exactly that.
+  function activateShortcut(alias, rest, typedToken) {
     activeShortcut = alias;
-    dismissedAlias = null;
+    shortcutTypedToken = typedToken || alias;
+    dismissedToken = null;
     input.value = rest || "";
     renderPill();
     const n = input.value.length;
@@ -290,22 +498,21 @@
   // or (once 3+ chars are typed) the most likely prefix completion.
   function aliasForSpace(token) {
     if (!token) return null;
-    if (shortcuts[token] && token !== dismissedAlias) return token;
-    if (token.length >= 3) {
-      const best = bestAliasByPrefix(token);
-      if (best && best !== dismissedAlias) return best;
-    }
+    if (shortcuts[token]) return token;
+    if (token.length >= 3) return bestAliasByPrefix(token);
     return null;
   }
 
-  // Remove the pill and restore the plain alias word so it can be used literally.
-  // `dismissedAlias` prevents the next space from immediately re-arming the pill.
+  // Remove the pill and restore the exact text the user typed, so they can use
+  // it literally. `dismissedToken` prevents the next space from re-arming until
+  // that first token is edited.
   function dismissShortcutPill() {
-    const alias = activeShortcut;
+    const typed = shortcutTypedToken || activeShortcut;
     activeShortcut = null;
-    dismissedAlias = alias;
+    shortcutTypedToken = null;
+    dismissedToken = typed;
     renderPill();
-    input.value = alias;
+    input.value = typed;
     const n = input.value.length;
     input.setSelectionRange(n, n);
     input.focus();
@@ -380,9 +587,27 @@
   // open tabs then history. With a shortcut pill active: restrict to tabs/history
   // under the shortcut's destination URL (and further narrow by the typed query).
   function computeResults() {
-    if (mode !== "search") return [];
+    if (mode !== "search" || commandState) return [];
     const raw = input ? input.value : "";
-    if (!activeShortcut && raw.trim().startsWith("/")) return [];
+
+    // Command palette: typing "/" lists matching commands.
+    if (!activeShortcut && raw.trim().startsWith("/")) {
+      const q = raw.trim().slice(1).toLowerCase();
+      let names = Object.keys(COMMANDS).filter((n) => n.startsWith(q));
+      if (!names.length) {
+        names = Object.keys(COMMANDS).filter(
+          (n) =>
+            n.includes(q) || COMMANDS[n].description.toLowerCase().includes(q)
+        );
+      }
+      names.sort();
+      return names.slice(0, MAX_RESULTS).map((n) => ({
+        type: "command",
+        name: n,
+        title: usageOf(n),
+        subtitle: COMMANDS[n].description,
+      }));
+    }
 
     let base = null;
     if (activeShortcut) {
@@ -437,29 +662,37 @@
       const row = document.createElement("div");
       row.className = "result" + (i === activeIndex ? " active" : "");
 
-      const img = document.createElement("img");
-      img.src = faviconUrl(r.url);
-      img.alt = "";
-      img.addEventListener("error", () => {
-        img.style.visibility = "hidden";
-      });
+      if (r.type === "command") {
+        const ic = document.createElement("div");
+        ic.className = "result-ic";
+        ic.textContent = "/";
+        row.appendChild(ic);
+      } else {
+        const img = document.createElement("img");
+        img.src = faviconUrl(r.url);
+        img.alt = "";
+        img.addEventListener("error", () => {
+          img.style.visibility = "hidden";
+        });
+        row.appendChild(img);
+      }
 
       const meta = document.createElement("div");
       meta.className = "meta";
       const title = document.createElement("div");
       title.className = "title";
-      title.textContent = r.title || r.url;
+      title.textContent = r.type === "command" ? r.title : r.title || r.url;
       const url = document.createElement("div");
       url.className = "url";
-      url.textContent = r.url;
+      url.textContent = r.type === "command" ? r.subtitle : r.url;
       meta.appendChild(title);
       meta.appendChild(url);
 
       const tag = document.createElement("div");
       tag.className = "tag";
-      tag.textContent = r.type === "tab" ? "Open tab" : "History";
+      tag.textContent =
+        r.type === "tab" ? "Open tab" : r.type === "command" ? "Command" : "History";
 
-      row.appendChild(img);
       row.appendChild(meta);
       row.appendChild(tag);
       row.addEventListener("click", () => chooseResult(i));
@@ -496,6 +729,11 @@
   function chooseResult(i) {
     const r = results[i];
     if (!r) return;
+    if (r.type === "command") {
+      // Remember the typed text (e.g. "/fav") to restore on backspace-out.
+      enterCommandMode(r.name, "", input ? input.value : "");
+      return;
+    }
     close();
     if (r.type === "tab") {
       chrome.runtime.sendMessage({
@@ -549,6 +787,70 @@
     }
     if (!isOpen) return; // when closed, let the page handle its own keys
 
+    // Command param mode: Space/Tab advance, Shift+Tab back, Enter runs.
+    if (commandState) {
+      if (e.key === "Tab" && e.shiftKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (commandState.index > 0) gotoPrevParam();
+        else close(); // Shift+Tab out of the first param closes
+        return;
+      }
+      if (e.key === "Tab" || e.key === " ") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        advanceParam();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        runCommandStructured();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close();
+        return;
+      }
+      if (e.key === "Backspace" && input && input.value === "") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (commandState.index > 0) gotoPrevParam();
+        else exitToText(); // Backspace out of the first param -> back to text
+        return;
+      }
+      // Left arrow at the start of the field -> previous param.
+      if (
+        e.key === "ArrowLeft" &&
+        input &&
+        input.selectionStart === 0 &&
+        input.selectionEnd === 0 &&
+        commandState.index > 0
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        gotoPrevParam();
+        return;
+      }
+      // Right arrow at the end of the field -> next param.
+      if (
+        e.key === "ArrowRight" &&
+        input &&
+        input.selectionStart === input.value.length &&
+        input.selectionEnd === input.value.length &&
+        commandState.index < commandState.params.length - 1
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        advanceParam();
+        return;
+      }
+      e.stopImmediatePropagation(); // block page; let the key type into the input
+      return;
+    }
+
     // Cmd/Ctrl + 1-8 opens the matching favorite.
     if ((e.metaKey || e.ctrlKey) && !e.altKey && /^[1-8]$/.test(e.key)) {
       e.preventDefault();
@@ -557,7 +859,7 @@
       return;
     }
 
-    // Arrow keys navigate the results list; Tab jumps to the first result.
+    // Arrow keys navigate the results list.
     if (e.key === "ArrowDown") {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -570,10 +872,18 @@
       moveSelection(-1);
       return;
     }
+    // Tab moves to the next suggestion (or, in the command palette, picks the
+    // command); Shift+Tab moves to the previous suggestion.
     if (e.key === "Tab") {
       e.preventDefault();
       e.stopImmediatePropagation();
-      selectFirstResult();
+      if (e.shiftKey) {
+        moveSelection(-1);
+      } else if (results.length && results[0].type === "command") {
+        chooseResult(activeIndex >= 0 ? activeIndex : 0);
+      } else {
+        selectFirstResult();
+      }
       return;
     }
 
@@ -584,6 +894,7 @@
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (activeIndex >= 0 && results[activeIndex]) chooseResult(activeIndex);
+      else if (results.length && results[0].type === "command") chooseResult(0);
       else submit();
     } else if (
       e.key === "Backspace" &&
@@ -601,10 +912,17 @@
     if (isOpen) e.stopImmediatePropagation();
   }
 
-  // Closing on input blur is what lets us coexist with extensions like Vimium,
-  // whose insert-mode Escape blurs the input before our keydown listener runs.
+  // Close on blur, but only once focus has actually left the whole bar. Deferring
+  // and checking the shadow root's active element lets focus move between the
+  // input and param pills without closing, while still closing on Escape-blur
+  // (e.g. Vimium), click-out, etc.
   function onFocusOut() {
-    if (isOpen) close();
+    if (!isOpen) return;
+    setTimeout(() => {
+      if (!isOpen) return;
+      const inside = host && host.shadowRoot && host.shadowRoot.activeElement;
+      if (!inside) close();
+    }, 0);
   }
 
   // ---- UI --------------------------------------------------------------------
@@ -616,7 +934,7 @@
   function openFavorite(i) {
     const url = favorites[i];
     if (!url) {
-      status(`Favorite ${i + 1} is empty. Set it with /fave ${i + 1} <url>`);
+      status(`Favorite ${i + 1} is empty. Set it with /favorite ${i + 1} <url>`);
       return;
     }
     close();
@@ -633,7 +951,7 @@
       btn.className = "fave" + (url ? "" : " empty");
       btn.title = url
         ? `${i + 1}: ${url}`
-        : `Empty — set with /fave ${i + 1} <url>`;
+        : `Empty — set with /favorite ${i + 1} <url>`;
 
       if (url) {
         const img = document.createElement("img");
@@ -657,9 +975,14 @@
         if (url) {
           openFavorite(i);
         } else {
-          input.value = `/fave ${i + 1} `;
+          // Start the /favorite command with this slot number and the current
+          // tab's URL prefilled.
+          enterCommandMode("favorite", String(i + 1));
+          advanceParam(); // commit the slot number, move to the url param
+          input.value = location.href;
+          updateParamInputWidth();
           input.focus();
-          showCommandHints(input.value);
+          input.select();
         }
       });
       favRow.appendChild(btn);
@@ -683,6 +1006,7 @@
       background: rgba(250, 250, 252, 0.98); border-radius: 16px;
       box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06);
       padding: 14px 18px; display: flex; align-items: center; gap: 12px;
+      overflow: hidden;
     }
     .icon { width: 20px; height: 20px; flex: 0 0 auto; opacity: 0.5; }
     .pill {
@@ -692,12 +1016,50 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 16px; font-weight: 600; line-height: 28px; white-space: nowrap;
     }
+    .chips { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .cmd-chips { display: none; align-items: center; gap: 8px; }
+    .cmd-pill {
+      display: inline-flex; align-items: center; height: 28px; padding: 0 12px;
+      border-radius: 9px; background: #6b4bff; color: #fff; white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px; font-weight: 600; line-height: 28px;
+    }
+    .param-pill {
+      display: inline-flex; align-items: center; gap: 6px; height: 28px;
+      padding: 0 10px; border-radius: 9px; background: rgba(107,75,255,0.14);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px; line-height: 28px; white-space: nowrap; min-width: 0;
+    }
+    .param-pill .plabel { color: #9a86ff; font-size: 12px; flex: 0 0 auto; }
+    .param-pill .pval {
+      color: #1c1c1e; font-weight: 600;
+      max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .param-pill.upcoming { background: rgba(107,75,255,0.07); cursor: pointer; }
+    .param-pill.upcoming .plabel { color: #b3b3ba; }
+    .param-pill.filled { cursor: pointer; }
+    .param-pill.active { box-shadow: inset 0 0 0 1.5px rgba(107,75,255,0.55); }
+    .param-pill.invalid {
+      background: rgba(255,64,64,0.14) !important;
+      box-shadow: inset 0 0 0 1.5px rgba(255,64,64,0.85) !important;
+      animation: arc-shake 0.35s ease;
+    }
+    .param-pill.invalid .plabel { color: #ff5a5a !important; }
+    input.param-active {
+      flex: 0 0 auto; min-width: 1ch; padding: 0; background: transparent;
+      font-size: 15px; line-height: 28px; font-weight: 600; color: #1c1c1e;
+    }
     input {
       all: unset; flex: 1 1 auto;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 20px; line-height: 28px; color: #1c1c1e; caret-color: #4b6cff;
     }
     input::placeholder { color: #9a9aa2; }
+    .result-ic {
+      width: 20px; height: 20px; flex: 0 0 auto; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(107,75,255,0.16); color: #6b4bff; font-weight: 700; font-size: 14px;
+    }
     .faves { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
     .fave {
       all: unset; box-sizing: border-box; position: relative;
@@ -754,6 +1116,11 @@
       text-shadow: 0 1px 3px rgba(0,0,0,0.5);
     }
     @keyframes arc-fade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes arc-shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-3px); }
+      75% { transform: translateX(3px); }
+    }
     @keyframes arc-pop {
       from { opacity: 0; transform: translateY(-8px) scale(0.98); }
       to { opacity: 1; transform: translateY(0) scale(1); }
@@ -769,6 +1136,10 @@
       .result .title { color: #f2f2f7; }
       .result .url { color: #9a9aa2; }
       .result .tag { background: rgba(255,255,255,0.1); color: #c7c7cc; }
+      .param-pill .pval { color: #f2f2f7; }
+      .param-pill { background: rgba(107,75,255,0.28); }
+      input.param-active { color: #f2f2f7; }
+      .result-ic { background: rgba(107,75,255,0.30); color: #b9a8ff; }
     }
   `;
 
@@ -792,6 +1163,7 @@
 
     const bar = document.createElement("div");
     bar.className = "bar";
+    barEl = bar;
 
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     icon.setAttribute("class", "icon");
@@ -817,6 +1189,15 @@
       if (activeShortcut) dismissShortcutPill();
     });
 
+    cmdChipsEl = document.createElement("span");
+    cmdChipsEl.className = "cmd-chips";
+    cmdChipsEl.style.display = "none";
+
+    const chips = document.createElement("span");
+    chips.className = "chips";
+    chips.appendChild(pillEl);
+    chips.appendChild(cmdChipsEl);
+
     favRow = document.createElement("div");
     favRow.className = "faves";
 
@@ -828,7 +1209,7 @@
     statusEl.className = "status";
 
     bar.appendChild(icon);
-    bar.appendChild(pillEl);
+    bar.appendChild(chips);
     bar.appendChild(input);
     stack.appendChild(bar);
     stack.appendChild(favRow);
@@ -855,27 +1236,52 @@
 
     input.addEventListener("blur", onFocusOut);
     input.addEventListener("input", () => {
+      // Command param mode: keep the active-param pill sized to its content.
+      if (commandState) {
+        updateParamInputWidth();
+        return;
+      }
       const v = input.value;
+
+      // Enter command param mode when a full/prefix command name is followed by
+      // a space (e.g. "/favorite " or "/fav " -> autocompletes to /favorite).
+      if (!activeShortcut) {
+        const cm = v.match(/^\/(\w+)\s([\s\S]*)$/);
+        if (cm) {
+          const name = COMMANDS[cm[1]] ? cm[1] : bestCommandByPrefix(cm[1]);
+          if (name) {
+            enterCommandMode(name, cm[2], "/" + cm[1]);
+            return;
+          }
+        }
+      }
+
       // Arm a shortcut pill when the first token (exact alias, or a 3+ char
       // prefix of one) is followed by a space — space autocompletes the alias.
       if (!activeShortcut) {
         const firstTok = v.split(/\s/)[0];
-        if (dismissedAlias && firstTok !== dismissedAlias) dismissedAlias = null;
+        if (dismissedToken && firstTok !== dismissedToken) dismissedToken = null;
         const m = v.match(/^(\S+)\s([\s\S]*)$/);
-        if (m) {
+        if (m && m[1] !== dismissedToken) {
           const alias = aliasForSpace(m[1]);
           if (alias) {
-            activateShortcut(alias, m[2]);
+            activateShortcut(alias, m[2], m[1]);
             activeIndex = -1;
             refreshResults();
             return;
           }
         }
       }
-      // Status line: command hints, else a "press space" alias suggestion.
-      if (!activeShortcut && v.startsWith("/")) {
-        showCommandHints(v);
-      } else if (!activeShortcut && v.length && !/\s/.test(v)) {
+
+      // Status line: a "press space" alias suggestion (command list shows in the
+      // results panel now).
+      if (
+        !activeShortcut &&
+        !v.startsWith("/") &&
+        v.length &&
+        !/\s/.test(v) &&
+        v !== dismissedToken
+      ) {
         const alias = aliasForSpace(v);
         status(alias && alias !== v ? `space → ${alias}` : "");
       } else {
@@ -903,14 +1309,18 @@
 
   function applyMode() {
     activeShortcut = null;
-    dismissedAlias = null;
+    dismissedToken = null;
+    shortcutTypedToken = null;
+    commandState = null;
     activeIndex = -1;
     if (mode === "url") {
       input.value = location.href;
+      renderCommandChips();
       renderPill();
       input.select();
     } else {
       input.value = "";
+      renderCommandChips();
       renderPill();
     }
     status("");
@@ -953,11 +1363,13 @@
     if (!isOpen) return;
     isOpen = false;
     activeShortcut = null;
-    dismissedAlias = null;
+    dismissedToken = null;
+    shortcutTypedToken = null;
+    commandState = null;
     results = [];
     activeIndex = -1;
     if (host && host.parentNode) host.parentNode.removeChild(host);
-    host = overlay = stack = input = pillEl = favRow = resultsEl = statusEl = null;
+    host = overlay = stack = input = barEl = pillEl = cmdChipsEl = favRow = resultsEl = statusEl = null;
   }
 
   function toggle(m) {
