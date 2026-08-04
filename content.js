@@ -16,13 +16,16 @@
   let stack = null;
   let input = null;
   let barEl = null;
+  let inputWrap = null;
+  let ghostEl = null;
   let pillEl = null;
   let cmdChipsEl = null;
   let favRow = null;
   let resultsEl = null;
   let statusEl = null;
   let isOpen = false;
-  let mode = "search"; // "search" | "url"
+  let opensInCurrentTab = false; // cmd+L: submit replaces the current tab
+  let defaultUrl = ""; // text the bar is prefilled with on open (cmd+L)
   let favorites = new Array(FAV_COUNT).fill(null);
   let shortcuts = {}; // alias -> url template (with %s)
   let activeShortcut = null; // alias currently shown as a pill
@@ -34,6 +37,10 @@
   let results = []; // current visible result rows
   let activeIndex = -1; // highlighted result, -1 = none (typing/search)
   let commandState = null; // active command param entry, or null
+  let domainScores = new Map(); // host -> score, for inline autocomplete
+  let ghostSuffix = ""; // current inline-autocomplete completion (after the caret)
+  let typedQuery = ""; // the user's actual typed text (preserved while navigating)
+  let navigating = false; // true while previewing a highlighted suggestion's URL
 
   // ---- Favorites / shortcuts persistence -------------------------------------
 
@@ -374,8 +381,9 @@
     } else {
       pillEl.style.display = "none";
       if (!commandState) {
-        input.placeholder =
-          mode === "url" ? "Edit URL or search…" : "Search or enter address…";
+        input.placeholder = opensInCurrentTab
+          ? "Edit URL or search…"
+          : "Search or enter address…";
       }
     }
   }
@@ -387,7 +395,7 @@
   function renderCommandChips() {
     if (!cmdChipsEl) return;
     // Detach the input before clearing so we don't destroy it, then re-place it.
-    if (barEl) barEl.appendChild(input);
+    if (inputWrap) inputWrap.appendChild(input);
     cmdChipsEl.textContent = "";
 
     if (!commandState) {
@@ -438,6 +446,7 @@
         cmdChipsEl.appendChild(pp);
       }
     }
+    if (ghostEl) renderGhost(); // hide any stale ghost while in command mode
     input.focus();
   }
 
@@ -587,7 +596,7 @@
   // open tabs then history. With a shortcut pill active: restrict to tabs/history
   // under the shortcut's destination URL (and further narrow by the typed query).
   function computeResults() {
-    if (mode !== "search" || commandState) return [];
+    if (commandState) return [];
     const raw = input ? input.value : "";
 
     // Command palette: typing "/" lists matching commands.
@@ -618,6 +627,16 @@
     const out = [];
     const seen = new Set();
 
+    // A matched base domain is always the top result, so Enter navigates there.
+    if (!base) {
+      const domHost = bestDomainMatch(raw);
+      if (domHost) {
+        const url = "https://" + domHost;
+        out.push({ type: "domain", title: domHost, url });
+        seen.add(canon(url));
+      }
+    }
+
     for (const t of openTabs) {
       if (t.tabId === currentTabId) continue;
       if (base && !underBase(t.url, base)) continue;
@@ -644,9 +663,14 @@
     return out;
   }
 
-  function refreshResults() {
+  function refreshResults(autoHighlightFirst) {
     results = computeResults();
     if (activeIndex >= results.length) activeIndex = results.length - 1;
+    // While typing a query, highlight the first suggestion by default so Enter
+    // goes to it (Arc-style). Only when something is typed, not on empty/prefill.
+    if (autoHighlightFirst && activeIndex < 0 && results.length) {
+      activeIndex = 0;
+    }
     renderResults();
   }
 
@@ -691,7 +715,13 @@
       const tag = document.createElement("div");
       tag.className = "tag";
       tag.textContent =
-        r.type === "tab" ? "Open tab" : r.type === "command" ? "Command" : "History";
+        r.type === "tab"
+          ? "Open tab"
+          : r.type === "command"
+          ? "Command"
+          : r.type === "domain"
+          ? "Website"
+          : "History";
 
       row.appendChild(meta);
       row.appendChild(tag);
@@ -719,11 +749,30 @@
     if (next < -1) next = -1;
     if (next > results.length - 1) next = results.length - 1;
     setActive(next, true);
+    previewSelection();
   }
 
-  function selectFirstResult() {
-    if (!results.length) return;
-    setActive(activeIndex < 0 ? 0 : Math.min(activeIndex + 1, results.length - 1), true);
+  // Mirror the highlighted suggestion's URL into the bar (omnibox-style). When
+  // nothing is highlighted, restore the user's typed text and the ghost.
+  function previewSelection() {
+    if (!input) return;
+    if (activeIndex < 0) {
+      navigating = false;
+      input.value = typedQuery;
+      const n = input.value.length;
+      input.setSelectionRange(n, n);
+      renderGhost();
+      return;
+    }
+    const r = results[activeIndex];
+    if (r && r.url) {
+      navigating = true;
+      input.value = r.url;
+      const n = input.value.length;
+      input.setSelectionRange(n, n);
+      ghostSuffix = "";
+      if (ghostEl) ghostEl.style.display = "none";
+    }
   }
 
   function chooseResult(i) {
@@ -736,11 +785,19 @@
     }
     close();
     if (r.type === "tab") {
+      // Switching to an already-open tab is the sensible action in both modes.
       chrome.runtime.sendMessage({
         type: "ARC_ACTIVATE_TAB",
         tabId: r.tabId,
         windowId: r.windowId,
       });
+    } else if (r.type === "domain") {
+      // A typed base domain always opens fresh (new tab, or current tab for
+      // cmd+L) — never switch to an existing tab under that domain.
+      if (opensInCurrentTab) location.assign(r.url);
+      else chrome.runtime.sendMessage({ type: "ARC_SEARCH_SUBMIT", url: r.url });
+    } else if (opensInCurrentTab) {
+      location.assign(r.url); // cmd+L: replace the current page
     } else {
       chrome.runtime.sendMessage({ type: "ARC_OPEN_FAVORITE", url: r.url });
     }
@@ -752,8 +809,105 @@
       openTabs = res.tabs || [];
       historyItems = res.history || [];
       currentTabId = res.currentTabId != null ? res.currentTabId : null;
-      if (isOpen) refreshResults();
+      buildDomainScores();
+      if (isOpen) {
+        refreshResults();
+        renderGhost();
+      }
     });
+  }
+
+  // ---- Inline URL autocomplete (ghost text) ----------------------------------
+
+  function hostOf(u) {
+    try {
+      return new URL(u).host.replace(/^www\./i, "").toLowerCase();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Score each visited host so autocomplete prefers open tabs, then frequently
+  // visited history.
+  function buildDomainScores() {
+    const scores = new Map();
+    for (const t of openTabs) {
+      const h = hostOf(t.url);
+      if (h) scores.set(h, (scores.get(h) || 0) + 1000);
+    }
+    for (const it of historyItems) {
+      const h = hostOf(it.url);
+      if (h) scores.set(h, (scores.get(h) || 0) + (it.visitCount || 1));
+    }
+    domainScores = scores;
+  }
+
+  // Returns the best visited base domain (host) whose name the typed value is a
+  // prefix of, or null. Domain-level only (no spaces/paths/commands/shortcuts).
+  function bestDomainMatch(value) {
+    if (!value || commandState || activeShortcut) return null;
+    if (/\s/.test(value) || value.startsWith("/")) return null;
+    const typed = value.replace(/^https?:\/\//i, "");
+    if (typed.includes("/")) return null;
+    const typedHost = typed.replace(/^www\./i, "").toLowerCase();
+    if (!typedHost) return null;
+    let best = null;
+    let bestScore = -1;
+    for (const [host, score] of domainScores) {
+      if (host.length < typedHost.length || !host.startsWith(typedHost)) continue;
+      if (
+        score > bestScore ||
+        (score === bestScore && (best === null || host.length < best.length))
+      ) {
+        best = host;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  // The completion suffix shown as ghost text (e.g. "gith" -> "ub.com"), or "".
+  function computeCompletion(value) {
+    const best = bestDomainMatch(value);
+    if (!best) return "";
+    const typedHost = value
+      .replace(/^https?:\/\//i, "")
+      .replace(/^www\./i, "")
+      .toLowerCase();
+    return best.slice(typedHost.length);
+  }
+
+  // Paints the ghost overlay: the typed text (transparent, to occupy width)
+  // followed by the completion suffix (faded).
+  function renderGhost() {
+    if (!ghostEl || !input) return;
+    ghostSuffix = navigating ? "" : computeCompletion(input.value);
+    if (!ghostSuffix) {
+      ghostEl.style.display = "none";
+      ghostEl.textContent = "";
+      return;
+    }
+    ghostEl.textContent = "";
+    const typed = document.createElement("span");
+    typed.className = "g-typed";
+    typed.textContent = input.value;
+    const suffix = document.createElement("span");
+    suffix.className = "g-suffix";
+    suffix.textContent = ghostSuffix;
+    ghostEl.appendChild(typed);
+    ghostEl.appendChild(suffix);
+    ghostEl.style.display = "flex";
+  }
+
+  // Accept the ghost completion (Right arrow): fill the text, don't navigate.
+  function completeGhost() {
+    if (!ghostSuffix) return false;
+    input.value = input.value + ghostSuffix;
+    const n = input.value.length;
+    input.setSelectionRange(n, n);
+    ghostSuffix = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
   }
 
   // ---- Key handling ----------------------------------------------------------
@@ -776,13 +930,13 @@
     if (isToggleCombo(e)) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      toggle("search");
+      toggle({});
       return;
     }
     if (isUrlCombo(e)) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      toggle("url");
+      toggle({ opensInCurrentTab: true, defaultUrl: location.href });
       return;
     }
     if (!isOpen) return; // when closed, let the page handle its own keys
@@ -859,7 +1013,21 @@
       return;
     }
 
-    // Arrow keys navigate the results list.
+    // Arrow keys navigate the results list. Right arrow at the end of the input
+    // accepts the inline ghost completion (fills the text, doesn't navigate).
+    if (
+      e.key === "ArrowRight" &&
+      !navigating &&
+      ghostSuffix &&
+      input &&
+      input.selectionStart === input.value.length &&
+      input.selectionStart === input.selectionEnd
+    ) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      completeGhost();
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -872,18 +1040,11 @@
       moveSelection(-1);
       return;
     }
-    // Tab moves to the next suggestion (or, in the command palette, picks the
-    // command); Shift+Tab moves to the previous suggestion.
+    // Tab moves to the next suggestion, Shift+Tab to the previous.
     if (e.key === "Tab") {
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (e.shiftKey) {
-        moveSelection(-1);
-      } else if (results.length && results[0].type === "command") {
-        chooseResult(activeIndex >= 0 ? activeIndex : 0);
-      } else {
-        selectFirstResult();
-      }
+      moveSelection(e.shiftKey ? -1 : 1);
       return;
     }
 
@@ -1055,6 +1216,16 @@
       font-size: 20px; line-height: 28px; color: #1c1c1e; caret-color: #4b6cff;
     }
     input::placeholder { color: #9a9aa2; }
+    .input-wrap { position: relative; flex: 1 1 auto; display: flex; min-width: 0; }
+    .input-wrap input { flex: 1 1 auto; position: relative; z-index: 1; }
+    .ghost {
+      position: absolute; inset: 0; z-index: 0; pointer-events: none;
+      display: none; align-items: center; white-space: pre; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 20px; line-height: 28px;
+    }
+    .ghost .g-typed { color: transparent; }
+    .ghost .g-suffix { color: #b9b9c0; }
     .result-ic {
       width: 20px; height: 20px; flex: 0 0 auto; border-radius: 5px;
       display: flex; align-items: center; justify-content: center;
@@ -1129,6 +1300,7 @@
       .bar { background: rgba(30, 30, 33, 0.98); }
       input { color: #f2f2f7; }
       input::placeholder { color: #8a8a90; }
+      .ghost .g-suffix { color: #6a6a72; }
       .fave { background: rgba(44, 44, 48, 0.98); color: #c7c7cc; }
       .fave.empty { background: rgba(60,60,64,0.6); }
       .results { background: rgba(30, 30, 33, 0.98); }
@@ -1143,10 +1315,12 @@
     }
   `;
 
-  function open(m) {
+  function open(opts) {
     if (isOpen) return;
+    opts = opts || {};
     isOpen = true;
-    mode = m || "search";
+    opensInCurrentTab = !!opts.opensInCurrentTab;
+    defaultUrl = opts.defaultUrl || "";
 
     host = document.createElement("div");
     host.id = HOST_ID;
@@ -1181,6 +1355,15 @@
     input.autocomplete = "off";
     input.spellcheck = false;
 
+    // Wrap the input so the ghost autocomplete overlay can sit behind it.
+    inputWrap = document.createElement("div");
+    inputWrap.className = "input-wrap";
+    ghostEl = document.createElement("div");
+    ghostEl.className = "ghost";
+    ghostEl.style.display = "none";
+    inputWrap.appendChild(ghostEl);
+    inputWrap.appendChild(input);
+
     pillEl = document.createElement("span");
     pillEl.className = "pill";
     pillEl.style.display = "none";
@@ -1210,7 +1393,7 @@
 
     bar.appendChild(icon);
     bar.appendChild(chips);
-    bar.appendChild(input);
+    bar.appendChild(inputWrap);
     stack.appendChild(bar);
     stack.appendChild(favRow);
     stack.appendChild(resultsEl);
@@ -1220,7 +1403,7 @@
     shadow.appendChild(overlay);
     document.documentElement.appendChild(host);
 
-    applyMode();
+    applyInitialState();
     renderFavorites();
     loadIndex();
 
@@ -1242,6 +1425,8 @@
         return;
       }
       const v = input.value;
+      typedQuery = v; // remember what the user actually typed
+      navigating = false;
 
       // Enter command param mode when a full/prefix command name is followed by
       // a space (e.g. "/favorite " or "/fav " -> autocompletes to /favorite).
@@ -1267,7 +1452,8 @@
           if (alias) {
             activateShortcut(alias, m[2], m[1]);
             activeIndex = -1;
-            refreshResults();
+            refreshResults(true);
+            renderGhost();
             return;
           }
         }
@@ -1288,7 +1474,9 @@
         status("");
       }
       activeIndex = -1; // reset selection whenever the query changes
-      refreshResults();
+      // Auto-highlight the first result only when a query is actually typed.
+      refreshResults(v.trim().length > 0);
+      renderGhost();
     });
 
     // Reliable Escape/Enter path when nothing upstream intercepts the key.
@@ -1307,31 +1495,29 @@
     input.focus();
   }
 
-  function applyMode() {
+  function applyInitialState() {
     activeShortcut = null;
     dismissedToken = null;
     shortcutTypedToken = null;
     commandState = null;
     activeIndex = -1;
-    if (mode === "url") {
-      input.value = location.href;
-      renderCommandChips();
-      renderPill();
-      input.select();
-    } else {
-      input.value = "";
-      renderCommandChips();
-      renderPill();
-    }
+    navigating = false;
+    typedQuery = defaultUrl || "";
+    input.value = defaultUrl || "";
+    renderCommandChips();
+    renderPill();
+    if (defaultUrl) input.select(); // highlight the prefilled URL for easy replace
     status("");
     refreshResults();
+    renderGhost();
   }
 
-  // Sends a resolved URL to the right place based on the current mode.
+  // Sends a resolved URL to the right place: the current tab (cmd+L) or a new
+  // tab (cmd+T).
   function dispatch(url) {
     close();
-    if (mode === "url") {
-      location.assign(url); // navigate the current tab
+    if (opensInCurrentTab) {
+      location.assign(url);
     } else {
       chrome.runtime.sendMessage({ type: "ARC_SEARCH_SUBMIT", url });
     }
@@ -1369,26 +1555,34 @@
     results = [];
     activeIndex = -1;
     if (host && host.parentNode) host.parentNode.removeChild(host);
-    host = overlay = stack = input = barEl = pillEl = cmdChipsEl = favRow = resultsEl = statusEl = null;
+    ghostSuffix = "";
+    host = overlay = stack = input = barEl = inputWrap = ghostEl = pillEl = cmdChipsEl = favRow = resultsEl = statusEl = null;
   }
 
-  function toggle(m) {
-    const next = m || "search";
+  function toggle(opts) {
+    opts = opts || {};
+    const nextCurrent = !!opts.opensInCurrentTab;
     if (isOpen) {
-      if (next !== mode) {
-        mode = next;
-        applyMode();
+      if (nextCurrent !== opensInCurrentTab) {
+        opensInCurrentTab = nextCurrent;
+        defaultUrl = opts.defaultUrl || "";
+        applyInitialState();
         input.focus();
       } else {
         close();
       }
     } else {
-      open(next);
+      open(opts);
     }
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message && message.type === "TOGGLE_ARC_SEARCH") toggle(message.mode);
+    if (message && message.type === "TOGGLE_ARC_SEARCH") {
+      toggle({
+        opensInCurrentTab: !!message.opensInCurrentTab,
+        defaultUrl: message.useCurrentUrl ? location.href : "",
+      });
+    }
   });
 
   // Registered at document_start so they run before page scripts on the capture

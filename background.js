@@ -1,22 +1,26 @@
-// Each configured command maps to a bar "mode":
-//   search -> empty bar, Enter opens the query in a NEW tab
-//   url    -> bar prefilled with the current URL, Enter navigates THIS tab
-const COMMAND_MODES = {
-  "toggle-search-bar": "search",
-  "open-url-bar": "url",
+// Each command opens the same bar with different options:
+//   toggle-search-bar -> empty bar, Enter opens in a NEW tab
+//   open-url-bar       -> prefilled with the current URL, Enter replaces THIS tab
+const COMMAND_OPTIONS = {
+  "toggle-search-bar": { opensInCurrentTab: false, useCurrentUrl: false },
+  "open-url-bar": { opensInCurrentTab: true, useCurrentUrl: true },
 };
 
 chrome.commands.onCommand.addListener((command) => {
-  const mode = COMMAND_MODES[command];
-  if (!mode) return;
+  const opts = COMMAND_OPTIONS[command];
+  if (!opts) return;
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];
     if (!tab || !tab.id) return;
-    chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_ARC_SEARCH", mode }, () => {
-      // Swallow "receiving end does not exist" on pages where the content
-      // script can't run (chrome:// pages, the web store, etc.).
-      void chrome.runtime.lastError;
-    });
+    chrome.tabs.sendMessage(
+      tab.id,
+      { type: "TOGGLE_ARC_SEARCH", ...opts },
+      () => {
+        // Swallow "receiving end does not exist" on pages where the content
+        // script can't run (chrome:// pages, the web store, etc.).
+        void chrome.runtime.lastError;
+      }
+    );
   });
 });
 
@@ -72,6 +76,7 @@ function getIndex(sender, sendResponse) {
             title: h.title || h.url,
             url: h.url,
             lastVisitTime: h.lastVisitTime || 0,
+            visitCount: h.visitCount || 1,
           }));
         sendResponse({
           currentTabId: sender.tab && sender.tab.id,

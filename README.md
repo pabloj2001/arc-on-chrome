@@ -10,8 +10,9 @@ A Chrome extension that replicates Arc's floating command/search bar.
   query such as `go/glean my search` (opened as `http://go/glean%20my%20search`). Anything
   that isn't URL-shaped (plain words, phrases) is searched on Google instead.
 - **Edit URL** — press the URL shortcut (**Cmd+L** / **Ctrl+L** by default) to open the bar
-  prefilled with the current tab's URL. Editing and pressing **Enter** navigates the
-  **current tab** (the same URL-vs-search resolution applies).
+  prefilled with the current tab's URL. It works exactly like the search bar (suggestions,
+  commands, autocomplete), except **Enter navigates the current tab** instead of opening a new
+  one. (Internally the bar just takes `opensInCurrentTab` / `defaultUrl` options.)
 - **Favorites** — save up to 8 favorites and jump to them with **Cmd+1 … Cmd+8** while the
   bar is open, or by clicking the favicon buttons shown under the bar. If the site is already
   open in a tab, it switches to that tab instead of opening a duplicate — matching by host and
@@ -23,9 +24,13 @@ A Chrome extension that replicates Arc's floating command/search bar.
 - **Slash commands** — type `/` followed by a command to run it (see below).
 - **Browse tabs & history** — under the bar, a result list shows your other open tabs. As you
   type, it matches by title/URL across open tabs first, then your last 7 days of history.
-  Use **↑/↓** to move the selection (**Tab** jumps to the first result), and **Enter** to go —
-  switching to the tab if it's already open, otherwise opening the page. The list shows ~4 rows
-  at a time (scroll for the rest, up to 10).
+  Use **↑/↓** or **Tab / Shift+Tab** to move the selection (which previews the highlighted
+  result's URL in the bar), and **Enter** to go — switching to the tab if it's already open,
+  otherwise opening the page. The list shows ~4 rows at a time (scroll for the rest, up to 10).
+- **Inline URL autocomplete** — as you type a domain you've visited before, the completion
+  appears as faded ghost text (`gith` → `ub.com`). The matched base domain is also shown as the
+  top result, so **Enter** opens it in a fresh tab. Press **→ (Right arrow)** to accept the
+  ghost completion into the text without navigating.
 
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
 
@@ -52,13 +57,15 @@ alias becomes a pill and whatever you type next is substituted into the template
 ## Commands
 
 Type **`/`** to open the command palette — a list of commands that filters as you type (each
-row shows the usage and a description). Pick one with **↑/↓ + Enter**, **Tab**, or a click
-(typing a command name + space also works, and autocompletes a prefix like `/short`).
+row shows the usage and a description). Pick one with **↑/↓ + Enter** or a click (typing a
+command name + space also works, and autocompletes a prefix like `/fav`).
 
-Selecting a command turns it into **pills**: the command name, then one pill per parameter.
-The active parameter's name shows as a placeholder — type its value and press **Space** or
-**Tab** to move to the next, **Shift+Tab** to go back, and **Backspace** on an empty parameter
-to step back (or exit the command). **Enter** runs it.
+Selecting a command turns it into **pills**: the command name, then one pill per parameter
+(all shown up front, upcoming ones faded). The active parameter shows its name as a label —
+type its value and press **Space** or **Tab** to move to the next, **Shift+Tab** (or **←/→**)
+to move between them, and **Backspace** on an empty parameter to step back (or back out to the
+typed text). **Enter** runs it — the bar stays open, clears, and shows a confirmation; if
+required parameters are empty they flash red instead.
 
 | Command | Description |
 | --- | --- |
