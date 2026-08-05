@@ -10,17 +10,20 @@
   const STORAGE_KEY = "arcFavorites";
   const SHORTCUTS_KEY = "arcShortcuts";
   const MAX_RESULTS = 10;
+  const MAX_CONTEXTS = 5;
 
   let host = null;
   let overlay = null;
   let stack = null;
   let input = null;
   let barEl = null;
+  let iconEl = null;
   let inputWrap = null;
   let ghostEl = null;
   let pillEl = null;
   let cmdChipsEl = null;
   let favRow = null;
+  let contextsRowEl = null;
   let resultsEl = null;
   let statusEl = null;
   let isOpen = false;
@@ -41,6 +44,44 @@
   let ghostSuffix = ""; // current inline-autocomplete completion (after the caret)
   let typedQuery = ""; // the user's actual typed text (preserved while navigating)
   let navigating = false; // true while previewing a highlighted suggestion's URL
+  let activeContext = null; // { groupId, name, color } or null
+  let contextsList = []; // all tracked contexts [{ groupId, name, color }]
+  let contextTemporarilyExited = false; // one-shot "use the default space" for this bar open
+
+  // Tab-group colors as rendered by Microsoft Edge (Fluent palette), sampled
+  // from Edge's own color picker. The tabGroups API only exposes color NAMES,
+  // so we map them to Edge's hexes to match the tab-strip chip. Light mode.
+  const GROUP_COLOR_HEX = {
+    grey: "#706d6b", blue: "#296eeb", cyan: "#038387", yellow: "#99700c",
+    orange: "#ca5010", pink: "#e3008c", purple: "#8230ff",
+    // Not used in the rotation (Edge has no true red/green); best-effort so any
+    // pre-existing group of these names still shows an Edge palette color.
+    red: "#c239b3", green: "#004e8c",
+  };
+  // Dark-mode tints (approximate; refined once sampled on a dark tab strip).
+  const GROUP_COLOR_HEX_DARK = {
+    grey: "#c8c6c4", blue: "#7aa5f5", cyan: "#4bb6ba", yellow: "#d9b12a",
+    orange: "#e8895a", pink: "#ff5aa8", purple: "#b48aff",
+    red: "#d873c9", green: "#4a86bf",
+  };
+
+  function isDarkScheme() {
+    return (
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    );
+  }
+
+  function groupHex(color) {
+    const map = isDarkScheme() ? GROUP_COLOR_HEX_DARK : GROUP_COLOR_HEX;
+    return map[color] || (isDarkScheme() ? "#c8d3ff" : "#325ccd");
+  }
+
+  // Readable text color to place on a group-colored pill (dark text on the light
+  // dark-mode tints, white on the saturated light-mode colors).
+  function groupTextColor() {
+    return isDarkScheme() ? "#202124" : "#fff";
+  }
 
   // ---- Favorites / shortcuts persistence -------------------------------------
 
@@ -220,11 +261,40 @@
         ctx.status(`Removed shortcut "${alias}"`);
       },
     },
+    context: {
+      description:
+        "Group tabs into an expiring context. No name resets to default.",
+      params: [
+        { name: "name", optional: true },
+        { name: "expiry", optional: true },
+      ],
+      run: (args, ctx) => {
+        const name = (args[0] || "").trim();
+        const expiry = (args[1] || "").trim();
+        if (!name) {
+          ctx.clearContext();
+          ctx.status("Context cleared — back to the default space");
+          return;
+        }
+        ctx.setContext(name, expiry); // status is set from the response
+      },
+    },
+    deletecontext: {
+      description: "Delete a context: closes its tab group and stops tracking it.",
+      params: [{ name: "name" }],
+      run: (args, ctx) => {
+        const name = (args[0] || "").trim();
+        if (!name) return ctx.status(`Usage: ${usageOf("deletecontext")}`);
+        ctx.deleteContext(name);
+      },
+    },
   };
 
   function usageOf(name) {
     const cmd = COMMANDS[name];
-    const params = (cmd.params || []).map((p) => `<${p.name}>`).join(" ");
+    const params = (cmd.params || [])
+      .map((p) => (p.optional ? `[${p.name}]` : `<${p.name}>`))
+      .join(" ");
     return `/${name}${params ? " " + params : ""}`;
   }
 
@@ -251,6 +321,51 @@
       removeShortcut: (alias) => {
         delete shortcuts[alias];
         saveShortcuts();
+      },
+      setContext: (name, expiry) => {
+        chrome.runtime.sendMessage(
+          { type: "ARC_SET_CONTEXT", name, expiry },
+          (res) => {
+            if (chrome.runtime.lastError || !res) return;
+            if (!res.ok) {
+              status(
+                res.reason === "duplicate"
+                  ? `A context named "${name}" already exists`
+                  : res.reason === "limit"
+                  ? "Context limit reached (max 5) — delete one first"
+                  : "Couldn't create context"
+              );
+              return;
+            }
+            activeContext = { groupId: res.groupId, name: res.name, color: res.color };
+            contextTemporarilyExited = false;
+            status(`Context "${res.name}" created`);
+            renderContext();
+            loadIndex(); // refresh the contexts row
+          }
+        );
+      },
+      clearContext: () => {
+        chrome.runtime.sendMessage({ type: "ARC_CLEAR_CONTEXT" }, () => {
+          void chrome.runtime.lastError;
+        });
+        activeContext = null;
+        contextTemporarilyExited = false;
+        renderContext();
+      },
+      deleteContext: (name) => {
+        chrome.runtime.sendMessage(
+          { type: "ARC_DELETE_CONTEXT", name },
+          (res) => {
+            if (chrome.runtime.lastError || !res) return;
+            if (!res.ok) {
+              status(`No context named "${name}"`);
+              return;
+            }
+            status(`Deleted context "${res.name}"`);
+            loadIndex(); // refresh row + active context
+          }
+        );
       },
       close,
       clearInput: () => {
@@ -356,9 +471,9 @@
     if (!commandState) return;
     commandState.values[commandState.index] = input.value;
     const missing = [];
-    commandState.params.forEach((_, i) => {
+    commandState.params.forEach((p, i) => {
       const v = commandState.values[i];
-      if (!v || !v.trim()) missing.push(i);
+      if (!p.optional && (!v || !v.trim())) missing.push(i);
     });
     if (missing.length) {
       flashInvalidParams(missing);
@@ -368,6 +483,174 @@
     const args = commandState.params.map((_, i) => commandState.values[i] || "");
     exitCommandMode(""); // keep the bar open, clear the text
     cmd.run(args, commandCtx()); // shows a status notification
+  }
+
+  // ---- Context (ephemeral tab group) -----------------------------------------
+
+  function contextActive() {
+    return !!activeContext && !contextTemporarilyExited;
+  }
+
+  function contextGroupIdForDispatch() {
+    return contextActive() ? activeContext.groupId : null;
+  }
+
+  // Instruction shown under the suggestions while a context is active.
+  function idleStatus() {
+    if (contextActive()) {
+      return "← exit context to open in the default space";
+    }
+    if (activeContext && contextTemporarilyExited) {
+      return "Default space — reopen the bar to return to the context";
+    }
+    return "";
+  }
+
+  // Tints the bar's border, search icon, and background with the active
+  // context's color (the context name is shown in the row above the bar).
+  function renderContext() {
+    if (!barEl) return;
+    if (contextActive()) {
+      const hex = groupHex(activeContext.color);
+      barEl.style.setProperty("--ctx-color", hex);
+      barEl.style.background = tintBg(hex);
+      if (iconEl) { iconEl.style.color = hex; iconEl.style.opacity = "1"; }
+      barEl.classList.add("has-context");
+    } else {
+      barEl.style.background = "";
+      if (iconEl) { iconEl.style.color = ""; iconEl.style.opacity = ""; }
+      barEl.classList.remove("has-context");
+    }
+    // Keep the bottom instruction in sync when nothing else owns the status.
+    if (!activeShortcut && !commandState && !input.value.trim()) {
+      status(idleStatus());
+    }
+  }
+
+  // A very faint version of the context color for the bar background, layered
+  // over the bar's normal near-opaque surface so it stays readable in both modes.
+  function tintBg(hex) {
+    const dark = isDarkScheme();
+    const base = dark ? "rgba(30,30,33,0.98)" : "rgba(250,250,252,0.98)";
+    const rgb = hexToRgb(hex);
+    if (!rgb) return base;
+    const a = dark ? 0.14 : 0.08;
+    return `linear-gradient(rgba(${rgb.r},${rgb.g},${rgb.b},${a}), rgba(${rgb.r},${rgb.g},${rgb.b},${a})), ${base}`;
+  }
+
+  function hexToRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+
+  // One-shot: leave the context for this bar session so the next tab opens in the
+  // default space. The context stays active and returns when the bar reopens.
+  function exitContextTemporarily() {
+    if (!contextActive()) return;
+    contextTemporarilyExited = true;
+    renderContext();
+    status(idleStatus());
+  }
+
+  // Numbered row of contexts above the bar: a "0" default chip on the far left,
+  // then each tracked context. Click (or Cmd/Ctrl+Shift+N) switches to one.
+  function renderContextsRow() {
+    if (!contextsRowEl) return;
+    contextsRowEl.textContent = "";
+    if (!contextsList.length) {
+      contextsRowEl.style.display = "none";
+      return;
+    }
+    contextsRowEl.style.display = "flex";
+
+    // Default (no context) chip, number 1.
+    const def = document.createElement("button");
+    def.className = "ctx-chip ctx-default" + (!activeContext ? " active" : "");
+    def.title = "Default space (Ctrl+1)";
+    const dnum = document.createElement("span");
+    dnum.className = "ctx-num";
+    dnum.textContent = "1";
+    const dnm = document.createElement("span");
+    dnm.className = "ctx-cname";
+    dnm.textContent = "Default";
+    def.appendChild(dnum);
+    def.appendChild(dnm);
+    def.addEventListener("click", switchContextToDefault);
+    contextsRowEl.appendChild(def);
+
+    contextsList.forEach((c, i) => {
+      const hex = groupHex(c.color);
+      const chip = document.createElement("button");
+      chip.className =
+        "ctx-chip" +
+        (activeContext && activeContext.groupId === c.groupId ? " active" : "");
+      chip.style.background = hex;
+      chip.style.color = groupTextColor();
+      chip.title = `Switch to "${c.name}" (Ctrl+${i + 2})`;
+      const num = document.createElement("span");
+      num.className = "ctx-num";
+      num.textContent = String(i + 2);
+      const nm = document.createElement("span");
+      nm.className = "ctx-cname";
+      nm.textContent = c.name;
+      chip.appendChild(num);
+      chip.appendChild(nm);
+      chip.addEventListener("click", () => switchContextByGroupId(c.groupId));
+      contextsRowEl.appendChild(chip);
+    });
+
+    // "+" chip to create a new context (hidden at the 5-context limit).
+    if (contextsList.length < MAX_CONTEXTS) {
+      const add = document.createElement("button");
+      add.className = "ctx-chip ctx-add";
+      add.title = "New context (Ctrl++)";
+      add.textContent = "+";
+      add.addEventListener("click", openContextCommand);
+      contextsRowEl.appendChild(add);
+    }
+  }
+
+  // Opens the /context command (with param pills) to create a new context.
+  function openContextCommand() {
+    if (contextsList.length >= MAX_CONTEXTS) {
+      status("Context limit reached (max 5) — delete one first");
+      return;
+    }
+    enterCommandMode("context", "", "/context");
+  }
+
+  // Switching just changes the active context (where new bar-opened tabs go);
+  // the bar stays open and its pill/border update.
+  function switchContextByGroupId(groupId) {
+    chrome.runtime.sendMessage(
+      { type: "ARC_SWITCH_CONTEXT", groupId },
+      (res) => {
+        if (chrome.runtime.lastError || !res || !res.ok) return;
+        activeContext = res.activeContext || null;
+        contextTemporarilyExited = false;
+        renderContext();
+        renderContextsRow();
+      }
+    );
+  }
+
+  function switchContextToDefault() {
+    chrome.runtime.sendMessage({ type: "ARC_CLEAR_CONTEXT" }, () => {
+      void chrome.runtime.lastError;
+    });
+    activeContext = null;
+    contextTemporarilyExited = false;
+    renderContext();
+    renderContextsRow();
+  }
+
+  // `digit` is the Ctrl+N number: 1 = default space, 2 = first context, etc.
+  function switchContextByIndex(digit) {
+    if (digit === 1) return switchContextToDefault();
+    const ctx = contextsList[digit - 2];
+    if (ctx) switchContextByGroupId(ctx.groupId);
   }
 
   // ---- Shortcut pill ---------------------------------------------------------
@@ -627,13 +910,26 @@
     const out = [];
     const seen = new Set();
 
-    // A matched base domain is always the top result, so Enter navigates there.
+    // Top result: a website to visit. Prefer a visited domain we can autocomplete
+    // to (so "linkedin.c" suggests the known "linkedin.com", matching the ghost);
+    // otherwise, if the typed text is itself a complete URL/host, visit it exactly.
     if (!base) {
-      const domHost = bestDomainMatch(raw);
-      if (domHost) {
-        const url = "https://" + domHost;
-        out.push({ type: "domain", title: domHost, url });
-        seen.add(canon(url));
+      const term = raw.trim();
+      const completion = bestDomainMatch(term); // full visited host, or null
+      let domUrl = null;
+      let domTitle = null;
+      if (completion) {
+        domUrl = "https://" + completion;
+        domTitle = completion;
+      } else if (looksLikeNavigable(term)) {
+        domUrl = normalizeUrl(term);
+        domTitle = domUrl
+          ? domUrl.replace(/^https?:\/\//i, "").replace(/\/$/, "")
+          : term;
+      }
+      if (domUrl) {
+        out.push({ type: "domain", title: domTitle, url: domUrl });
+        seen.add(canon(domUrl));
       }
     }
 
@@ -645,11 +941,11 @@
       if (seen.has(c)) continue;
       seen.add(c);
       out.push({ type: "tab", title: t.title, url: t.url, tabId: t.tabId, windowId: t.windowId });
-      if (out.length >= MAX_RESULTS) return out;
+      if (out.length >= MAX_RESULTS) break;
     }
 
     // Include history when there's a query, or a shortcut base to browse under.
-    if (tokens.length || base) {
+    if (out.length < MAX_RESULTS && (tokens.length || base)) {
       for (const h of historyItems) {
         const c = canon(h.url);
         if (seen.has(c)) continue;
@@ -659,6 +955,20 @@
         out.push({ type: "history", title: h.title, url: h.url });
         if (out.length >= MAX_RESULTS) break;
       }
+    }
+
+    // Offer "Search for <term>" as the second suggestion whenever there's a typed
+    // term and at least one other suggestion (skip in shortcut mode). This lets
+    // Enter go to the top match while a search alternative is one step away.
+    const term = raw.trim();
+    if (!base && term && out.length) {
+      out.splice(1, 0, {
+        type: "search",
+        term,
+        title: `Search for “${term}”`,
+        url: `https://www.google.com/search?q=${encodeURIComponent(term)}`,
+      });
+      if (out.length > MAX_RESULTS) out.length = MAX_RESULTS;
     }
     return out;
   }
@@ -691,6 +1001,17 @@
         ic.className = "result-ic";
         ic.textContent = "/";
         row.appendChild(ic);
+      } else if (r.type === "search") {
+        const ic = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        ic.setAttribute("class", "result-ic-svg");
+        ic.setAttribute("viewBox", "0 0 24 24");
+        ic.setAttribute("fill", "none");
+        ic.setAttribute("stroke", "currentColor");
+        ic.setAttribute("stroke-width", "2");
+        ic.setAttribute("stroke-linecap", "round");
+        ic.innerHTML =
+          '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
+        row.appendChild(ic);
       } else {
         const img = document.createElement("img");
         img.src = faviconUrl(r.url);
@@ -705,10 +1026,16 @@
       meta.className = "meta";
       const title = document.createElement("div");
       title.className = "title";
-      title.textContent = r.type === "command" ? r.title : r.title || r.url;
+      title.textContent =
+        r.type === "command" || r.type === "search" ? r.title : r.title || r.url;
       const url = document.createElement("div");
       url.className = "url";
-      url.textContent = r.type === "command" ? r.subtitle : r.url;
+      url.textContent =
+        r.type === "command"
+          ? r.subtitle
+          : r.type === "search"
+          ? "Google Search"
+          : r.url;
       meta.appendChild(title);
       meta.appendChild(url);
 
@@ -721,6 +1048,8 @@
           ? "Command"
           : r.type === "domain"
           ? "Website"
+          : r.type === "search"
+          ? "Search"
           : "History";
 
       row.appendChild(meta);
@@ -765,13 +1094,16 @@
       return;
     }
     const r = results[activeIndex];
-    if (r && r.url) {
-      navigating = true;
-      input.value = r.url;
+    if (!r) return;
+    navigating = true;
+    ghostSuffix = "";
+    if (ghostEl) ghostEl.style.display = "none";
+    // The search suggestion keeps the typed term in the bar (not the Google URL).
+    const shown = r.type === "search" ? r.term : r.url;
+    if (shown != null) {
+      input.value = shown;
       const n = input.value.length;
       input.setSelectionRange(n, n);
-      ghostSuffix = "";
-      if (ghostEl) ghostEl.style.display = "none";
     }
   }
 
@@ -791,15 +1123,24 @@
         tabId: r.tabId,
         windowId: r.windowId,
       });
-    } else if (r.type === "domain") {
-      // A typed base domain always opens fresh (new tab, or current tab for
-      // cmd+L) — never switch to an existing tab under that domain.
+    } else if (r.type === "domain" || r.type === "search") {
+      // A typed base domain or an explicit search always opens fresh (new tab,
+      // or current tab for cmd+L) — never switch to an existing tab.
       if (opensInCurrentTab) location.assign(r.url);
-      else chrome.runtime.sendMessage({ type: "ARC_SEARCH_SUBMIT", url: r.url });
+      else
+        chrome.runtime.sendMessage({
+          type: "ARC_SEARCH_SUBMIT",
+          url: r.url,
+          groupId: contextGroupIdForDispatch(),
+        });
     } else if (opensInCurrentTab) {
       location.assign(r.url); // cmd+L: replace the current page
     } else {
-      chrome.runtime.sendMessage({ type: "ARC_OPEN_FAVORITE", url: r.url });
+      chrome.runtime.sendMessage({
+        type: "ARC_OPEN_FAVORITE",
+        url: r.url,
+        groupId: contextGroupIdForDispatch(),
+      });
     }
   }
 
@@ -809,8 +1150,12 @@
       openTabs = res.tabs || [];
       historyItems = res.history || [];
       currentTabId = res.currentTabId != null ? res.currentTabId : null;
+      activeContext = res.activeContext || null;
+      contextsList = res.contexts || [];
       buildDomainScores();
       if (isOpen) {
+        renderContext();
+        renderContextsRow();
         refreshResults();
         renderGhost();
       }
@@ -842,8 +1187,8 @@
     domainScores = scores;
   }
 
-  // Returns the best visited base domain (host) whose name the typed value is a
-  // prefix of, or null. Domain-level only (no spaces/paths/commands/shortcuts).
+  // Returns the best visited base domain (host) the typed value is a prefix of,
+  // or null. Prefers root domains over subdomains, then most-used, then shortest.
   function bestDomainMatch(value) {
     if (!value || commandState || activeShortcut) return null;
     if (/\s/.test(value) || value.startsWith("/")) return null;
@@ -851,23 +1196,32 @@
     if (typed.includes("/")) return null;
     const typedHost = typed.replace(/^www\./i, "").toLowerCase();
     if (!typedHost) return null;
-    let best = null;
-    let bestScore = -1;
+    const cands = [];
     for (const [host, score] of domainScores) {
       if (host.length < typedHost.length || !host.startsWith(typedHost)) continue;
-      if (
-        score > bestScore ||
-        (score === bestScore && (best === null || host.length < best.length))
-      ) {
-        best = host;
-        bestScore = score;
-      }
+      cands.push({ host, score, labels: host.split(".").length });
     }
-    return best;
+    if (!cands.length) return null;
+    cands.sort(
+      (a, b) =>
+        a.labels - b.labels || // root domains before subdomains
+        b.score - a.score || // then most-used
+        a.host.length - b.host.length // then shortest
+    );
+    return cands[0].host;
   }
 
-  // The completion suffix shown as ghost text (e.g. "gith" -> "ub.com"), or "".
+  // The completion suffix shown as ghost text: completes a command name when
+  // typing "/…", otherwise a visited base domain (e.g. "gith" -> "ub.com"), or "".
   function computeCompletion(value) {
+    if (!value || commandState || activeShortcut) return "";
+    // Command-name ghost: "/fav" -> "orite".
+    if (value.startsWith("/") && !/\s/.test(value)) {
+      const partial = value.slice(1).toLowerCase();
+      if (!partial) return "";
+      const best = bestCommandByPrefix(partial);
+      return best ? best.slice(partial.length) : "";
+    }
     const best = bestDomainMatch(value);
     if (!best) return "";
     const typedHost = value
@@ -941,16 +1295,17 @@
     }
     if (!isOpen) return; // when closed, let the page handle its own keys
 
-    // Command param mode: Space/Tab advance, Shift+Tab back, Enter runs.
+    // Command param mode: Tab advances to the next param, Shift+Tab goes back
+    // (does nothing on the first param), Enter runs. Space types normally.
     if (commandState) {
       if (e.key === "Tab" && e.shiftKey) {
         e.preventDefault();
         e.stopImmediatePropagation();
         if (commandState.index > 0) gotoPrevParam();
-        else close(); // Shift+Tab out of the first param closes
+        // On the first param, Shift+Tab is a no-op.
         return;
       }
-      if (e.key === "Tab" || e.key === " ") {
+      if (e.key === "Tab") {
         e.preventDefault();
         e.stopImmediatePropagation();
         advanceParam();
@@ -1005,11 +1360,40 @@
       return;
     }
 
-    // Cmd/Ctrl + 1-8 opens the matching favorite.
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && /^[1-8]$/.test(e.key)) {
+    // Ctrl+1-9 switches context (1 = default, 2 = first context, ...); Cmd+1-8
+    // opens the Nth favorite. On macOS metaKey = Cmd, ctrlKey = Ctrl. Uses e.code
+    // so the physical digit is used regardless of modifiers.
+    if (!e.altKey && !e.shiftKey) {
+      const digit = /^Digit([0-9])$/.exec(e.code);
+      if (digit) {
+        const n = parseInt(digit[1], 10);
+        // Ctrl (without Cmd) -> switch context.
+        if (e.ctrlKey && !e.metaKey && n >= 1) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          switchContextByIndex(n); // 1 = default, 2..N = context
+          return;
+        }
+        // Cmd (without Ctrl) -> open favorite.
+        if (e.metaKey && !e.ctrlKey && n >= 1 && n <= 8) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          openFavorite(n - 1);
+          return;
+        }
+      }
+    }
+
+    // Ctrl++ (or Ctrl+=) opens the /context command to create a new context.
+    if (
+      e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      (e.key === "+" || e.key === "=" || e.code === "Equal")
+    ) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      openFavorite(parseInt(e.key, 10) - 1);
+      openContextCommand();
       return;
     }
 
@@ -1028,6 +1412,21 @@
       completeGhost();
       return;
     }
+    // Left arrow at the start of the input, while in a context, temporarily
+    // exits it so the next tab opens in the default space.
+    if (
+      e.key === "ArrowLeft" &&
+      contextActive() &&
+      !navigating &&
+      input &&
+      input.selectionStart === 0 &&
+      input.selectionEnd === 0
+    ) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      exitContextTemporarily();
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -1040,11 +1439,23 @@
       moveSelection(-1);
       return;
     }
-    // Tab moves to the next suggestion, Shift+Tab to the previous.
+    // Tab: first press autofills the (already-highlighted) first suggestion —
+    // filling the bar with its URL, or entering a highlighted command. Pressing
+    // Tab again moves to the next suggestion. Shift+Tab goes to the previous.
     if (e.key === "Tab") {
       e.preventDefault();
       e.stopImmediatePropagation();
-      moveSelection(e.shiftKey ? -1 : 1);
+      if (e.shiftKey) {
+        moveSelection(-1);
+      } else if (!navigating && activeIndex >= 0 && results[activeIndex]) {
+        if (results[activeIndex].type === "command") {
+          chooseResult(activeIndex); // enter the command
+        } else {
+          previewSelection(); // fill the bar with the first suggestion
+        }
+      } else {
+        moveSelection(1);
+      }
       return;
     }
 
@@ -1098,9 +1509,10 @@
       status(`Favorite ${i + 1} is empty. Set it with /favorite ${i + 1} <url>`);
       return;
     }
+    const groupId = contextGroupIdForDispatch();
     close();
     // Switch to an existing tab with this URL if one is open, else new tab.
-    chrome.runtime.sendMessage({ type: "ARC_OPEN_FAVORITE", url });
+    chrome.runtime.sendMessage({ type: "ARC_OPEN_FAVORITE", url, groupId });
   }
 
   function renderFavorites() {
@@ -1169,6 +1581,9 @@
       padding: 14px 18px; display: flex; align-items: center; gap: 12px;
       overflow: hidden;
     }
+    .bar.has-context {
+      box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 2px var(--ctx-color, #4b6cff);
+    }
     .icon { width: 20px; height: 20px; flex: 0 0 auto; opacity: 0.5; }
     .pill {
       flex: 0 0 auto; display: none; align-items: center;
@@ -1231,7 +1646,38 @@
       display: flex; align-items: center; justify-content: center;
       background: rgba(107,75,255,0.16); color: #6b4bff; font-weight: 700; font-size: 14px;
     }
+    .result-ic-svg { width: 18px; height: 18px; flex: 0 0 auto; color: #8a8a90; }
     .faves { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .contexts-row {
+      display: none; gap: 8px; justify-content: center; flex-wrap: wrap;
+    }
+    .ctx-chip {
+      all: unset; box-sizing: border-box; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 30px; padding: 0 12px; border-radius: 10px; color: #fff;
+      background: #4b6cff; opacity: 0.82;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px; font-weight: 600; white-space: nowrap;
+      transition: transform 90ms ease, opacity 90ms ease;
+    }
+    .ctx-chip:hover { transform: translateY(-2px); opacity: 1; }
+    .ctx-chip.active { opacity: 1; box-shadow: 0 6px 18px rgba(0,0,0,0.28), 0 0 0 2px #fff; }
+    .ctx-chip.ctx-default {
+      background: rgba(120,120,128,0.9); color: #fff;
+    }
+    .ctx-chip.ctx-default.active { box-shadow: 0 6px 18px rgba(0,0,0,0.28), 0 0 0 2px #4b6cff; }
+    .ctx-chip.ctx-add {
+      background: #fff; color: #6a6a70;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+      font-size: 20px; font-weight: 500; line-height: 1; padding: 0 12px;
+    }
+    .ctx-chip.ctx-add:hover { background: #f2f2f4; color: #3a3a40; }
+    .ctx-chip .ctx-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px;
+      background: rgba(255,255,255,0.28); font-size: 11px; font-weight: 700;
+    }
     .fave {
       all: unset; box-sizing: border-box; position: relative;
       width: 46px; height: 46px; border-radius: 12px; cursor: pointer;
@@ -1243,7 +1689,7 @@
       transition: transform 90ms ease, box-shadow 90ms ease;
     }
     .fave:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.28), 0 0 0 1px rgba(0,0,0,0.08); }
-    .fave.empty { background: rgba(255,255,255,0.55); box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
+    .fave.empty { background: #e6e6ea; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
     .fave img { width: 24px; height: 24px; border-radius: 5px; display: block; }
     .fave .badge {
       position: absolute; bottom: -6px; right: -6px;
@@ -1302,7 +1748,7 @@
       input::placeholder { color: #8a8a90; }
       .ghost .g-suffix { color: #6a6a72; }
       .fave { background: rgba(44, 44, 48, 0.98); color: #c7c7cc; }
-      .fave.empty { background: rgba(60,60,64,0.6); }
+      .fave.empty { background: #3a3a3e; }
       .results { background: rgba(30, 30, 33, 0.98); }
       .result.active { background: rgba(75, 108, 255, 0.28); }
       .result .title { color: #f2f2f7; }
@@ -1341,6 +1787,7 @@
 
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     icon.setAttribute("class", "icon");
+    iconEl = icon;
     icon.setAttribute("viewBox", "0 0 24 24");
     icon.setAttribute("fill", "none");
     icon.setAttribute("stroke", "currentColor");
@@ -1384,6 +1831,10 @@
     favRow = document.createElement("div");
     favRow.className = "faves";
 
+    contextsRowEl = document.createElement("div");
+    contextsRowEl.className = "contexts-row";
+    contextsRowEl.style.display = "none";
+
     resultsEl = document.createElement("div");
     resultsEl.className = "results";
     resultsEl.style.display = "none";
@@ -1394,6 +1845,7 @@
     bar.appendChild(icon);
     bar.appendChild(chips);
     bar.appendChild(inputWrap);
+    stack.appendChild(contextsRowEl);
     stack.appendChild(bar);
     stack.appendChild(favRow);
     stack.appendChild(resultsEl);
@@ -1502,24 +1954,28 @@
     commandState = null;
     activeIndex = -1;
     navigating = false;
+    contextTemporarilyExited = false; // context returns on each fresh open
     typedQuery = defaultUrl || "";
     input.value = defaultUrl || "";
     renderCommandChips();
     renderPill();
+    renderContext();
+    renderContextsRow();
     if (defaultUrl) input.select(); // highlight the prefilled URL for easy replace
-    status("");
+    status(idleStatus());
     refreshResults();
     renderGhost();
   }
 
   // Sends a resolved URL to the right place: the current tab (cmd+L) or a new
-  // tab (cmd+T).
+  // tab (cmd+T, added to the active context group when one is set).
   function dispatch(url) {
+    const groupId = contextGroupIdForDispatch();
     close();
     if (opensInCurrentTab) {
       location.assign(url);
     } else {
-      chrome.runtime.sendMessage({ type: "ARC_SEARCH_SUBMIT", url });
+      chrome.runtime.sendMessage({ type: "ARC_SEARCH_SUBMIT", url, groupId });
     }
   }
 
@@ -1556,7 +2012,7 @@
     activeIndex = -1;
     if (host && host.parentNode) host.parentNode.removeChild(host);
     ghostSuffix = "";
-    host = overlay = stack = input = barEl = inputWrap = ghostEl = pillEl = cmdChipsEl = favRow = resultsEl = statusEl = null;
+    host = overlay = stack = input = barEl = inputWrap = ghostEl = pillEl = cmdChipsEl = favRow = contextsRowEl = resultsEl = statusEl = null;
   }
 
   function toggle(opts) {

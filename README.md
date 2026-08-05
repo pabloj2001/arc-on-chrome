@@ -28,9 +28,42 @@ A Chrome extension that replicates Arc's floating command/search bar.
   result's URL in the bar), and **Enter** to go — switching to the tab if it's already open,
   otherwise opening the page. The list shows ~4 rows at a time (scroll for the rest, up to 10).
 - **Inline URL autocomplete** — as you type a domain you've visited before, the completion
-  appears as faded ghost text (`gith` → `ub.com`). The matched base domain is also shown as the
-  top result, so **Enter** opens it in a fresh tab. Press **→ (Right arrow)** to accept the
-  ghost completion into the text without navigating.
+  appears as faded ghost text (`gith` → `ub.com`), preferring root domains over subdomains. The
+  matched domain is also shown as the top **Website** result, so **Enter** opens it in a fresh
+  tab; press **→ (Right arrow)** to accept the ghost into the text without navigating. Typing a
+  complete URL you've never visited still offers it as the top result.
+- **Search suggestion** — whenever there's at least one other suggestion, a **Search for "…"**
+  row is inserted as the second result, so you can always fall back to a web search.
+- **Contexts** — group your work into expiring tab groups with `/context` (see below).
+
+The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
+
+## Contexts (expiring tab groups)
+
+A **context** is an ephemeral browser tab group that tabs you open get collected into, and that
+cleans itself up after a period of inactivity.
+
+- `/context <name> [expiry]` — create a context (max 5): makes a colored tab group named
+  `<name>`, moves the current tab into it, and makes it active. While a context is active, tabs
+  you open **from the bar** (searches, favorites, suggestions) go into that group. `expiry` is
+  `Nh` / `Nd` (e.g. `8h`, `1d`); it defaults to **24h**. Names must be unique.
+- `/context` with **no name** resets to the default space (the group itself stays until it
+  expires). `/deletecontext <name>` closes a context's group and stops tracking it.
+- The group is titled `<name> [<time remaining>]` and the countdown resets whenever you visit a
+  tab inside it. When it expires, the group's tabs are closed.
+
+A row above the bar shows the **default space** and each context as numbered chips (colored to
+match the tab group), plus a **+** chip to create a new one. Switch with a click or
+**Ctrl+1** (default), **Ctrl+2** (first context), … ; **Ctrl++** opens the new-context command.
+While a context is active the bar's border, search icon, and a faint background tint take on the
+group's color. Press **← (Left arrow)** at the start of the input to *temporarily* leave the
+context so the next tab opens in the default space; it returns the next time you open the bar.
+
+Contexts are tracked in `chrome.storage.local` and survive browser restarts. A background alarm
+checks every minute: it closes + untracks expired groups and refreshes the remaining-time in
+each title. If a tracked group no longer exists (you closed it, or the browser reset its tabs)
+it is **kept** — not untracked — until it expires, so reopening closed tabs can land back in a
+live context.
 
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
 
@@ -62,8 +95,8 @@ command name + space also works, and autocompletes a prefix like `/fav`).
 
 Selecting a command turns it into **pills**: the command name, then one pill per parameter
 (all shown up front, upcoming ones faded). The active parameter shows its name as a label —
-type its value and press **Space** or **Tab** to move to the next, **Shift+Tab** (or **←/→**)
-to move between them, and **Backspace** on an empty parameter to step back (or back out to the
+type its value and press **Tab** to move to the next parameter, **Shift+Tab** (or **←/→**) to
+move between them, and **Backspace** on an empty parameter to step back (or back out to the
 typed text). **Enter** runs it — the bar stays open, clears, and shows a confirmation; if
 required parameters are empty they flash red instead.
 
@@ -73,6 +106,8 @@ required parameters are empty they flash red instead.
 | `/unfavorite <1-8>` | Clear a favorite |
 | `/shortcut <alias> <url with %s>` | Add a keyword shortcut, e.g. `/shortcut go https://go/%s` |
 | `/unshortcut <alias>` | Remove a keyword shortcut |
+| `/context [name] [expiry]` | Start an expiring tab-group context (no name resets to default) |
+| `/deletecontext <name>` | Close a context's tab group and stop tracking it |
 
 Favorites and shortcuts are stored with `chrome.storage.local`, so they persist across browser
 restarts and stay in sync across tabs. The favicon buttons under the bar reflect your saved
@@ -123,6 +158,6 @@ recommended.
 
 ## Files
 
-- `manifest.json` — MV3 manifest, permissions (`commands`, `tabs`, `storage`, `favicon`, `history`), and command bindings.
-- `background.js` — routes the shortcuts to the page (with a mode), opens results in new tabs, switches to an existing tab when opening a favorite, and serves the open-tabs + 7-day history index used by the result list.
-- `content.js` — renders the bar (isolated Shadow DOM), handles input, modes, favorites, keyword shortcuts, the tabs/history result list, the command registry, and dismissal.
+- `manifest.json` — MV3 manifest, permissions (`commands`, `tabs`, `storage`, `favicon`, `history`, `tabGroups`, `alarms`), and command bindings.
+- `background.js` — routes the shortcuts to the page, opens results in new tabs, switches to an existing tab when opening a favorite, serves the open-tabs + 7-day history index, and manages contexts (tab groups): creation, grouping new tabs, and the expiry/title-refresh alarm.
+- `content.js` — renders the bar (isolated Shadow DOM), handles input, modes, favorites, keyword shortcuts, the tabs/history result list, inline autocomplete, the search suggestion, the command palette/param pills, and the contexts row + coloring.
