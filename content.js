@@ -11,6 +11,10 @@
   const SHORTCUTS_KEY = "arcShortcuts";
   const MAX_RESULTS = 10;
   const MAX_CONTEXTS = 5;
+  const ICON_SEARCH =
+    '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
+  const ICON_BACK =
+    '<line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>';
 
   let host = null;
   let overlay = null;
@@ -514,11 +518,23 @@
       const hex = groupHex(activeContext.color);
       barEl.style.setProperty("--ctx-color", hex);
       barEl.style.background = tintBg(hex);
-      if (iconEl) { iconEl.style.color = hex; iconEl.style.opacity = "1"; }
+      if (iconEl) {
+        iconEl.innerHTML = ICON_BACK; // clickable back arrow -> exit to default
+        iconEl.style.color = hex;
+        iconEl.style.opacity = "1";
+        iconEl.classList.add("clickable");
+        iconEl.setAttribute("aria-label", "Back to default space");
+      }
       barEl.classList.add("has-context");
     } else {
       barEl.style.background = "";
-      if (iconEl) { iconEl.style.color = ""; iconEl.style.opacity = ""; }
+      if (iconEl) {
+        iconEl.innerHTML = ICON_SEARCH;
+        iconEl.style.color = "";
+        iconEl.style.opacity = "";
+        iconEl.classList.remove("clickable");
+        iconEl.removeAttribute("aria-label");
+      }
       barEl.classList.remove("has-context");
     }
     // Keep the bottom instruction in sync when nothing else owns the status.
@@ -1123,9 +1139,14 @@
         tabId: r.tabId,
         windowId: r.windowId,
       });
-    } else if (r.type === "domain" || r.type === "search") {
-      // A typed base domain or an explicit search always opens fresh (new tab,
-      // or current tab for cmd+L) — never switch to an existing tab.
+    } else if (
+      r.type === "domain" ||
+      r.type === "search" ||
+      r.type === "history"
+    ) {
+      // A typed base domain, explicit search, or a chosen history entry always
+      // navigates to that exact URL (new tab, or current tab for cmd+L) — never
+      // switch to some other open tab that merely shares the domain.
       if (opensInCurrentTab) location.assign(r.url);
       else
         chrome.runtime.sendMessage({
@@ -1584,7 +1605,9 @@
     .bar.has-context {
       box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 2px var(--ctx-color, #4b6cff);
     }
-    .icon { width: 20px; height: 20px; flex: 0 0 auto; opacity: 0.5; }
+    .icon { width: 20px; height: 20px; flex: 0 0 auto; opacity: 0.5; pointer-events: none; }
+    .icon.clickable { pointer-events: auto; cursor: pointer; }
+    .icon.clickable:hover { opacity: 0.8 !important; }
     .pill {
       flex: 0 0 auto; display: none; align-items: center;
       height: 28px; padding: 0 12px; border-radius: 9px;
@@ -1793,8 +1816,12 @@
     icon.setAttribute("stroke", "currentColor");
     icon.setAttribute("stroke-width", "2");
     icon.setAttribute("stroke-linecap", "round");
-    icon.innerHTML =
-      '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
+    icon.setAttribute("stroke-linejoin", "round");
+    icon.innerHTML = ICON_SEARCH;
+    // Inside a context the icon is a back arrow that temporarily exits to default.
+    icon.addEventListener("click", () => {
+      if (contextActive()) exitContextTemporarily();
+    });
 
     input = document.createElement("input");
     input.type = "text";
