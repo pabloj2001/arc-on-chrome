@@ -973,18 +973,30 @@
       }
     }
 
-    // Offer "Search for <term>" as the second suggestion whenever there's a typed
-    // term and at least one other suggestion (skip in shortcut mode). This lets
-    // Enter go to the top match while a search alternative is one step away.
+    // Offer a "Search for <term>" result as the second suggestion whenever there
+    // is a typed term and at least one other suggestion. This lets Enter go to
+    // the top match while the search alternative is one step away. In shortcut
+    // mode the search runs the shortcut query instead of a plain web search.
     const term = raw.trim();
-    if (!base && term && out.length) {
-      out.splice(1, 0, {
-        type: "search",
-        term,
-        title: `Search for “${term}”`,
-        url: `https://www.google.com/search?q=${encodeURIComponent(term)}`,
-      });
-      if (out.length > MAX_RESULTS) out.length = MAX_RESULTS;
+    if (term && out.length) {
+      const searchResult = base
+        ? {
+            type: "search",
+            term,
+            title: `Search “${activeShortcut}” for “${term}”`,
+            engineLabel: templateBase(shortcuts[activeShortcut]).host,
+            url: applyShortcut(shortcuts[activeShortcut], term),
+          }
+        : {
+            type: "search",
+            term,
+            title: `Search for “${term}”`,
+            url: `https://www.google.com/search?q=${encodeURIComponent(term)}`,
+          };
+      if (searchResult.url) {
+        out.splice(1, 0, searchResult);
+        if (out.length > MAX_RESULTS) out.length = MAX_RESULTS;
+      }
     }
     return out;
   }
@@ -1050,7 +1062,7 @@
         r.type === "command"
           ? r.subtitle
           : r.type === "search"
-          ? "Google Search"
+          ? r.engineLabel || "Google Search"
           : r.url;
       meta.appendChild(title);
       meta.appendChild(url);
