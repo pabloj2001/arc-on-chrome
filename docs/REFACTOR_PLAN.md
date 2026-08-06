@@ -1,0 +1,418 @@
+# Refactor Plan — Modular Architecture with a Build Step
+
+Status: **REVISED after review — ready to execute pending final sign-off**
+Branch: `refactor/modular-architecture`
+
+> **Review incorporated.** A separate reviewer critiqued the first draft. The
+> blocking items changed five decisions, now baked into the sections below:
+> (1) **framework-free** for this refactor — Preact is deferred to a separate,
+> test-guarded change (§2); (2) **build into the repo root**, not `dist/`, to
+> preserve the unpacked extension's identity and `chrome.storage` (§3); (3)
+> the service worker ships as a **bundled classic IIFE** (§3); (4) the content
+> state model is a **reducer + explicit imperative-effects layer + generation
+> IDs**, not a generic reactive store (§6); (5) a **committed Playwright + Vitest
+> baseline is Phase 0**, established green against the *current* files before any
+> code moves (§8). Remaining review notes are tracked inline as **[review]**.
+
+## 1. Goal & constraints
+
+Today the extension is two hand-written flat files:
+
+- `content.js` — **2114 lines**, a single IIFE holding all UI + state + logic.
+- `background.js` — **410 lines**, the MV3 service worker.
+
+We want to split this into small, single-responsibility modules organized into
+directories, optionally using a UI framework, and **compile them back down to
+the exact two artifacts the manifest loads**: `content.js` and `background.js`
+(plus any CSS the bundler inlines). The runtime behavior must be byte-for-byte
+equivalent from the user's perspective — this is a pure restructuring, no
+feature changes.
+
+Hard constraints that shape every decision below:
+
+1. **The content script must ship as ONE self-contained file.** MV3 content
+   scripts declared in the manifest cannot use native ESM `import` at runtime.
+   Everything must be bundled into a single IIFE. (Same for the service worker,
+   which *can* use ESM via `"type": "module"`, but we'll bundle it too for
+   consistency and to allow shared modules.)
+2. **Runs at `document_start`, on `<all_urls>`, in `all_frames`.** The content
+   bundle must stay small and must not assume the page DOM/CSS. It already
+   guards with `window.top !== window` and a shadow root — that stays.
+3. **Shadow DOM isolation is mandatory.** All styles must live inside the shadow
+   root; a framework's global style injection is unacceptable.
+4. **No network at runtime, no CDN.** Everything is bundled locally.
+5. **Zero behavior change.** Same keyboard model, same messages, same storage
+   keys (`arcFavorites`, `arcShortcuts`, `arcContexts`, `arcActiveContextId`).
+
+## 2. Framework decision
+
+The bar is largely imperative DOM today, but it has clear component-shaped
+pieces (bar, pills, chips, results list, favorites row, contexts row). Options:
+
+| Option | Bundle cost | Fit | Notes |
+| --- | --- | --- | --- |
+| **A. No framework** — small render modules + explicit DOM helpers | ~0 KB | Good | Least churn, keeps full control, but we keep hand-writing DOM diffing. |
+| **B. Preact + TSX** | ~4 KB gz | **Best** | React-like DX, tiny, renders cleanly into a shadow root, signals available for state. |
+| **C. React + TSX** | ~40 KB gz | OK | Familiar, but heavy for a content script injected on every page/frame. |
+
+**Decision: Option A (framework-free) for this refactor.** [review — blocking]
+Preact does not actually stay confined to the `ui/` layer: controlled-input
+commit timing, caret/selection restoration, focus management, DOM measurement
+(the param-pill width hack), and mount/unmount lifecycle all cross into the
+keyboard/state/lifecycle code. Adopting it here would turn a "pure
+restructuring" into a behavioral rewrite. So we keep the view as small,
+explicit render modules (typed DOM helpers) with the **same file layout** as
+below, and the keyboard path stays in the global native capture-phase listener
+(never component handlers, which can't be authoritative under our
+`stopImmediatePropagation` model). **Preact/React is re-evaluated as a separate,
+interaction-test-guarded change after this refactor lands** — the directory
+design does not depend on that outcome, since only the `ui/` implementation
+would change.
+
+**Language: TypeScript** regardless. Typed `Message` unions and `Result` types
+remove a whole class of the bugs we've been hand-fixing (e.g. result-type
+routing in `chooseResult`).
+
+For reference, the options considered:
+
+| Option | Bundle cost | Notes |
+| --- | --- | --- |
+| **A. Framework-free** (chosen) | ~0 KB | Least behavior risk, keeps full control of caret/focus/measurement/propagation. |
+| B. Preact + TSX | ~4 KB gz | Nice DX, but controlled-input + capture-phase-key interplay is a real migration hazard; deferred. |
+| C. React + TSX | ~40 KB gz | Too heavy for a script injected on every page/frame. |
+
+## 3. Build tooling
+
+- **Bundler: `esbuild`.** Two entry points → two **classic IIFE** outputs. Fast
+  (<50ms), trivial config, first-class TS, CSS `text` loader. (Vite + `crxjs` is
+  the heavier alternative; esbuild is enough since our manifest is static.)
+- **Build into the REPO ROOT, not a separate `dist/`.** [review — blocking]
+  Chrome derives an unpacked extension's ID from its load path; loading a
+  different directory would spawn a *second* extension with empty
+  `chrome.storage` (losing favorites/shortcuts/contexts) and duplicate command
+  bindings. So the load directory stays the repo root and the build **emits
+  `content.js` and `background.js` at the root** (overwriting the files that are
+  now the hand-written source). Source moves under `src/`; the root `.js` files
+  become build artifacts.
+- **Outputs (both bundled, `bundle: true`, `splitting: false`):**
+  - `src/content/index.ts` → `./content.js` — `format: "iife"`, single file, CSS inlined as a string.
+  - `src/background/index.ts` → `./background.js` — **`format: "iife"` (classic worker)**, so the manifest needs **no `"type": "module"`** and top-level listeners register synchronously. [review — blocking: format was ambiguous; fixed]
+  - `manifest.json` stays at the root, unchanged, still referencing `content.js` / `background.js`.
+- **Dev vs prod modes.** [review] `npm run dev` = esbuild `--watch`, **unminified + external source maps** (`sourcemap: "external"`, no `eval`-based maps — MV3 CSP forbids them). `npm run build` = `minify: true`, no source maps. `npm run typecheck` = `tsc --noEmit`. Explicit `target` (e.g. `chrome120`); no dynamic code generation emitted.
+- **Load target is unchanged (repo root).** The existing unpacked install keeps
+  working across the cutover — no re-add, no lost storage. This is verified in
+  Phase 0/1 (favorites, shortcuts, contexts survive the first build).
+- **CSS:** the ~200-line `STYLES` template string becomes `bar.css`, imported via
+  the esbuild `text` loader and injected as **exactly one** `<style>` in the
+  shadow root. [review] A test asserts: one host, one shadow root, one `<style>`,
+  and no global/emitted stylesheet.
+- **Source layout is committed; build artifacts are committed too.** [review /
+  open-Q resolved] Since the load dir is the repo root, `content.js` and
+  `background.js` (built) are committed so the extension stays loadable without a
+  build. `src/` is the source of truth; a note in the README and a build check
+  (below) keep them from drifting. `node_modules/` stays ignored.
+
+## 4. Feature inventory (what must survive the move)
+
+Enumerated from the current code + README so nothing is dropped:
+
+### Content script (`content.js`) features
+1. **Injection guard** — top-frame only, single-injection flag.
+2. **Two open modes** — search (new tab, `Cmd+T`) and edit-URL (current tab,
+   `Cmd+L`, prefilled + selected).
+3. **Favorites** — 8 slots, `Cmd+1..8`, favicon buttons, empty-slot styling,
+   focus-or-create matching, storage sync.
+4. **Keyword shortcuts (pills)** — alias+space arms a pill, `%s` templating,
+   backspace-to-dismiss, dismissed-token guard, scheme inference.
+5. **Slash-command palette** — `/` list, prefix autocomplete, fuzzy fallback.
+6. **Command param mode (pills)** — per-param pills, Tab/Shift+Tab/←/→ nav,
+   backspace step-back, required-param flash, structured run.
+7. **Command registry** — `favorite`, `unfavorite`, `shortcut`, `unshortcut`,
+   `context`, `deletecontext` (+ the "add a command" extension pattern).
+8. **Results list** — open tabs + 7-day history, query matching, dedup/canon,
+   scoped-to-base in shortcut mode, "Website" domain result, "Search for …"
+   second result, tab/history/domain/search/command result types + routing.
+9. **Inline URL autocomplete (ghost)** — domain scoring, best-domain match,
+   root-over-subdomain preference, `→` to accept.
+10. **Contexts (ephemeral tab groups)** — active-context tint (border/icon/bg),
+    numbered contexts row (+default chip, `+` chip), switch by click/`Ctrl+1..N`,
+    `Ctrl++` to create, back-arrow icon, temp-exit via `←` / empty Backspace,
+    `Cmd+L` shows current tab's context, Edge color palette mapping.
+11. **Keyboard engine** — global capture-phase listeners (Vimium coexistence),
+    toggle/url combo detection, Escape/Enter/Arrows/Tab handling, propagation
+    blocking while open.
+12. **Lifecycle** — open/close/toggle, focus management, close-on-blur,
+    close-on-backdrop, initial-state application.
+13. **Dispatch** — new tab vs current tab, context group routing.
+
+### Background (`background.js`) features
+A. **Command routing** — `chrome.commands` → `TOGGLE_ARC_SEARCH` with options.
+B. **Message router** — the `onMessage` switch (8 message types).
+C. **Index builder** — `getIndex`: open tabs + 7-day history + context state +
+   current tab group id.
+D. **Favorite open** — `focusOrCreateTab` + `tabMatchesFavorite` + `parseUrl`.
+E. **Contexts core** — storage (`getContexts`/`setContexts`/active id), create,
+   clear, switch, delete, add-tab-to-group, expiry parsing/formatting, titles.
+F. **Alarms & tab events** — 1-min tick (`tickContexts`), `onActivated`
+   last-active refresh, `closeGroupTabs`, alarm bootstrap.
+
+## 5. Proposed directory structure
+
+```
+arc-search-extension/
+├─ manifest.json                 # root, unchanged — still points at content.js / background.js
+├─ content.js                    # BUILD OUTPUT (committed) — bundled IIFE, loaded by manifest
+├─ background.js                 # BUILD OUTPUT (committed) — bundled classic worker
+├─ content.js.map, background.js.map   # dev only, git-ignored
+├─ package.json                  # scripts + devDeps (esbuild, typescript, vitest, playwright)
+├─ tsconfig.json
+├─ build.mjs                     # esbuild config (2 entry points, css text loader, dev/prod)
+├─ docs/
+│  └─ REFACTOR_PLAN.md
+├─ tests/
+│  ├─ unit/                      # Vitest: pure modules (shared/url, search/results, contexts/expiry…)
+│  └─ e2e/                       # Playwright smoke/regression harness (committed baseline)
+└─ src/
+   ├─ shared/                    # imported by BOTH bundles (kills current duplication)
+   │  ├─ messages.ts             # Message REQUEST + RESPONSE unions + runtime validators (§7)
+   │  ├─ constants.ts            # storage keys + FAV_COUNT, MAX_RESULTS, MAX_CONTEXTS, GROUP_COLORS, durations
+   │  ├─ url.ts                  # parseUrl, canon, hostPath, normalizeUrl, ensureScheme, schemeFor, looksLikeNavigable, faviconUrl, buildUrl, applyShortcut
+   │  └─ colors.ts               # GROUP_COLOR_HEX(_DARK), groupHex, groupTextColor, isDarkScheme, hexToRgb, tintBg
+   │
+   ├─ background/
+   │  ├─ index.ts                # entry: registers ALL listeners synchronously (commands, onMessage, alarms, tab events) BEFORE any await
+   │  ├─ commands.ts             # chrome.commands routing (feature A)
+   │  ├─ router.ts               # onMessage switch → handlers, payload validation, `return true` per async reply (feature B)
+   │  ├─ index-builder.ts        # getIndex (feature C)
+   │  ├─ favorites.ts            # focusOrCreateTab, tabMatchesFavorite (feature D)
+   │  └─ contexts.ts             # contexts core: store + create/clear/switch/delete + expiry/alarms/tab-events (features E,F)
+   │
+   └─ content/
+      ├─ index.ts                # entry: injection guard, register key listeners SYNC, then bootstrap storage/index
+      ├─ state/
+      │  ├─ store.ts             # reducer + dispatch + generation IDs (§6). Canonical UI state ONLY.
+      │  ├─ actions.ts           # typed actions: OPEN_SEARCH, OPEN_URL, SET_QUERY, ARM_PILL, ENTER_PARAM, PREVIEW_RESULT, CLOSE, …
+      │  ├─ selectors.ts         # derived: contextActive(), contextGroupIdForDispatch(), idleStatus(), urlMode()
+      │  └─ effects.ts           # imperative-effects layer: focus/select/setSelectionRange/scrollIntoView/measure, run AFTER commit
+      ├─ data/                   # cached (non-canonical) data, not in the reducer
+      │  ├─ favorites.ts         # load/save/sync favorites + shortcuts (storage.onChanged)
+      │  ├─ index-client.ts      # loadIndex(): ARC_GET_INDEX, holds openTabs/history/context cache (guarded by generation id)
+      │  └─ domain-scores.ts     # buildDomainScores, bestDomainMatch, hostOf
+      ├─ search/
+      │  ├─ results.ts           # computeResults, refreshResults, matchesQuery, templateBase, underBase (pure over inputs)
+      │  └─ autocomplete.ts      # computeCompletion, ghost suffix logic
+      ├─ commands/
+      │  ├─ registry.ts          # COMMANDS definitions ONLY (no side effects)
+      │  ├─ effects-api.ts       # the ctx effects object (setFavorite, setContext, …) — returns intents, doesn't import UI
+      │  ├─ runner.ts            # runCommand, runCommandStructured, usageOf, bestCommandByPrefix
+      │  └─ param-mode.ts        # enter/exit command mode, advance/prev param, flashInvalidParams (uses effects.ts for measure)
+      ├─ keyboard/
+      │  ├─ combos.ts            # isToggleCombo, isUrlCombo
+      │  └─ keydown.ts           # the authoritative native capture-phase engine, onKeyOther, propagation blocking
+      ├─ dispatch/               # split per review to avoid a god-module + cycles
+      │  ├─ navigation.ts        # dispatch(url): new-tab vs current-tab + context group routing (background messaging)
+      │  └─ actions.ts           # submit(), chooseResult(i), openFavorite(i): orchestrates results+context → navigation
+      ├─ lifecycle.ts            # open/close/toggle, applyInitialState, onFocusOut, lazy mount/unmount of the host
+      └─ ui/                     # VIEW layer only (framework-free render modules)
+         ├─ mount.ts             # create host + shadow root, inject bar.css as ONE <style>, own DOM refs
+         ├─ bar.css              # the STYLES string, extracted
+         ├─ icons.ts             # ICON_SEARCH, ICON_BACK
+         ├─ render-bar.ts        # overlay/backdrop, bar frame, input + ghost, status line
+         ├─ render-pill.ts       # shortcut pill
+         ├─ render-command-chips.ts  # command name chip + param pills (keeps ONE stable input node — see §6)
+         ├─ render-results.ts    # results list + row (tab/history/domain/search/command)
+         ├─ render-favorites.ts  # favicon buttons row
+         └─ render-contexts-row.ts   # default chip + context chips + "+" chip, tint application
+```
+
+> [review] The tree above is **less granular** than the first draft (~20 modules
+> vs ~30): `background/contexts/*` collapsed to one `contexts.ts`, `shared/url`
+> absorbs the thin `url-builder` wrappers, and `storage-keys` folds into
+> `constants`. We start from these cohesive modules and only split further if a
+> real dependency-direction or test boundary demands it.
+
+### Why this split
+- **`shared/`** kills the current duplication: `parseUrl`, color maps, storage
+  keys, and message strings exist in *both* files today and drift apart. One
+  source of truth, typed.
+- **`background/contexts.ts`** keeps the single biggest background concern
+  (roughly half of `background.js`) in one cohesive module (storage + lifecycle +
+  expiry + alarms) rather than four tiny files. [review]
+- **`content/` is split by concern:** `state`, `data`, `search`, `commands`,
+  `keyboard`, `dispatch`, `lifecycle`, `ui`. Each maps directly to the feature
+  inventory in §4 so a reviewer can check coverage 1:1.
+- **Directional dependencies to avoid cycles** [review — blocking risk]:
+  `shared` (pure) → `search`/`data` (pure-ish over inputs) → `state` (reducer +
+  actions) → `commands`/`dispatch`/`lifecycle` (effect orchestrators) →
+  `ui` (render only) and `keyboard` (calls actions/orchestrators). **Commands
+  return intents** via `effects-api.ts` instead of importing `lifecycle`/`ui`/
+  `dispatch` directly; the runner applies them. `dispatch/` is split into
+  `navigation.ts` (pure background messaging) and `actions.ts` (orchestration)
+  so `submit`/`chooseResult` don't pull the whole graph into one node.
+- **`ui/` is the only view layer.** Framework-free render modules own all DOM
+  refs (via `mount.ts`); logic modules never hold element handles.
+
+## 6. State model (the crux of the content refactor)
+
+Today ~25 module-level `let`s + DOM element refs are mutated in place and
+re-rendered by scattered `renderX()` calls. Target — **a reducer + an explicit
+imperative-effects layer, NOT a generic reactive store** [review — blocking],
+because current behavior depends on *ordered* mutations immediately followed by
+`focus()`, `select()`, `setSelectionRange()`, `scrollIntoView()`, and layout
+measurement; a batching/reordering reactive store would break the ghost caret,
+result scroll, and param-pill width.
+
+- **Canonical UI state (reducer, `state/store.ts`)** — the source of truth:
+  `isOpen`, `mode` (`search|url`; `opensInCurrentTab`/`urlMode` are *derived*
+  from this, not stored twice), `defaultUrl`, `query`/`typedQuery`, `results`,
+  `activeIndex`, `pill` (`activeShortcut`, `dismissedToken`, `typedToken`),
+  `command` (name, params, index, values), `context` (`active`, `list`,
+  `tempExited`, `currentTabGroupId`), `ghostSuffix`, `navigating`, and a
+  monotonically increasing **`generation` id**.
+- **Cached data (NOT in the reducer, lives in `data/`)** — `favorites`,
+  `shortcuts`, `openTabs`, `history`, `domainScores`. Inputs to `computeResults`,
+  refreshed from storage/index; the reducer reads snapshots.
+- **Transient DOM state (owned by `ui/mount.ts`)** — all element refs leave
+  state entirely.
+- **Generation IDs guard async races** [review]: `loadIndex()` responses, the
+  ~700ms invalid-param flash timer, and any deferred callback capture the
+  `generation` at issue time and no-op if the bar has since closed/reopened.
+- **Effects run after commit** [review]: reducers are pure; the dispatcher, after
+  applying an action and letting `ui/` render, invokes `state/effects.ts` for
+  focus/select/caret/scroll/measure. Actions are **atomic transitions** —
+  `OPEN_SEARCH`, `OPEN_URL`, `SET_QUERY`, `ARM_PILL`, `DISMISS_PILL`,
+  `ENTER_PARAM`, `ADVANCE_PARAM`, `PREVIEW_RESULT`, `CHOOSE_RESULT`, `CLOSE` —
+  each pairing a state change with a declared effect, replacing the ~15 ad-hoc
+  `renderX()` calls and the "forgot to call renderContext()" bug class.
+- **The param-pill input is ONE stable node** [review]: it is *moved* between the
+  bar and the active pill (never remounted per-parameter), and
+  `scrollWidth`/`getBoundingClientRect` measurement happens only in the
+  post-commit effect phase. `render-command-chips.ts` documents this invariant.
+
+## 7. Message protocol (typed, in `shared/messages.ts`)
+
+Freeze the existing wire format, just give it types — **including response
+shapes and boundary validation** [review]:
+
+```ts
+type ToContent = { type: "TOGGLE_ARC_SEARCH"; opensInCurrentTab?: boolean; useCurrentUrl?: boolean };
+
+type ToBackground =
+  | { type: "ARC_SEARCH_SUBMIT"; url: string; groupId: number | null }
+  | { type: "ARC_OPEN_FAVORITE"; url: string; groupId: number | null }
+  | { type: "ARC_ACTIVATE_TAB"; tabId: number; windowId?: number }
+  | { type: "ARC_SET_CONTEXT"; name: string; expiry?: string }
+  | { type: "ARC_CLEAR_CONTEXT" }
+  | { type: "ARC_SWITCH_CONTEXT"; groupId: number }
+  | { type: "ARC_DELETE_CONTEXT"; name: string }
+  | { type: "ARC_GET_INDEX" };
+
+// Response contracts (previously implicit) — one per request that replies:
+type Responses = {
+  ARC_SET_CONTEXT: { ok: boolean; reason?: "duplicate" | "limit"; groupId?: number; name?: string; color?: string };
+  ARC_SWITCH_CONTEXT: { ok: boolean; activeContext?: ContextInfo };
+  ARC_DELETE_CONTEXT: { ok: boolean; reason?: "notfound"; name?: string };
+  ARC_GET_INDEX: { currentTabId: number|null; currentTabGroupId: number; tabs: TabInfo[]; history: HistoryInfo[]; activeContext: ContextInfo|null; contexts: ContextInfo[] };
+  ARC_CLEAR_CONTEXT: { ok: boolean };
+};
+```
+
+- **No new/renamed messages** — guarantees background and content stay
+  compatible at every phase.
+- **`router.ts` validates payloads** at the boundary and preserves `return true`
+  for every async `sendResponse` path (the existing bug-prone spot). [review]
+- Tests cover `chrome.runtime.lastError` and **service-worker suspension/restart**
+  between messages (no correctness may depend on worker module-level state).
+  [review]
+
+## 8. Execution phases
+
+Each phase ends **green**: `npm run build` succeeds, the extension still loads
+from the repo root (same install, storage intact), Vitest passes, and the
+committed Playwright harness passes. We migrate incrementally so the root
+`content.js`/`background.js` are always loadable.
+
+0. **Baseline harness (before any code moves).** [review — blocking] Commit the
+   Playwright e2e harness (the flows used this session) plus a first Vitest set,
+   and record them **green against the current root files**. Cover the
+   behavior-sensitive spots: caret/selection + ghost autocomplete, param-pill
+   mode + width, propagation blocking (Vimium coexistence), Escape/Enter/arrow
+   nav, favorites focus-or-create, context create/switch/temp-exit/expiry,
+   `Cmd+L` current-tab context, and **service-worker restart** between messages.
+   Note which checks require manual Chrome/Edge verification (command shortcuts,
+   Fluent tab-group colors).
+1. **Scaffold build (verbatim move).** Add `package.json`, `tsconfig.json`,
+   `build.mjs`, devDeps (esbuild, typescript, vitest). Create
+   `src/content/index.ts` + `src/background/index.ts` containing the *current*
+   code moved verbatim (as `.ts` with `// @ts-nocheck`). Register all
+   listeners synchronously at module top (before any `await`). [review] Build to
+   the **repo root** `content.js`/`background.js`. **Verify the existing unpacked
+   install still works and storage is intact** (favorites/shortcuts/contexts).
+   No logic split yet.
+2. **Extract `shared/`** — pull `url`, `colors`, `constants` (incl. storage keys),
+   `messages` out of both files; de-duplicate. Typecheck.
+3. **Split `background/`** into the module tree (§5), `contexts.ts` cohesive.
+   Verify context lifecycle + alarms + worker-restart via the harness.
+4. **Split `content/` logic only** — `state` (reducer + actions + effects),
+   `data`, `search`, `commands`, `keyboard`, `dispatch`, `lifecycle`. **Introduce
+   the reducer here with a thin compatibility renderer** that calls the existing
+   DOM render functions from declared effects, so state is designed **once**
+   (not redesigned in Phase 5). [review] Keep the single stable input node.
+5. **Rebuild the `ui/` layer** — port `STYLES` → `bar.css` (one `<style>` in the
+   shadow root, asserted by test), turn the render functions into clean
+   framework-free `render-*.ts` modules driven by the reducer's effects. DOM refs
+   consolidate in `mount.ts`.
+6. **Harden** — remove `@ts-nocheck`, turn on `strict`, delete dead code, add
+   source maps to dev build, final Vitest + Playwright pass, update README
+   (build steps, "load unpacked from repo root", regenerated "Files" section).
+
+The harness from Phase 0 runs at the end of **every** phase.
+
+## 9. Risks & mitigations
+- **Behavior drift during split** → migrate verbatim first (Phase 1), split
+  behind a green build, run Vitest + the Playwright baseline each phase.
+- **Losing extension identity / storage on cutover** [review — blocking] → build
+  into the **repo root** (not `dist/`) so the load path is unchanged; verify
+  favorites/shortcuts/contexts survive the first build in Phase 1.
+- **Missed early commands** [review] → register all content + worker listeners
+  **synchronously at module evaluation, before any `await`**; no top-level await.
+- **Async races landing on a reopened bar** [review] → generation IDs on every
+  deferred callback (§6).
+- **Framework/event interference** → framework-free; keyboard stays in the global
+  native capture-phase listener (§2).
+- **Content bundle bloat** [review] → measure raw/min/gzip **and** parse/startup
+  cost (script runs at `document_start`); budget stays tiny without a framework.
+- **`all_frames` cost** [review] → verify whether top-frame-only manifest
+  injection preserves behavior; if so set `all_frames:false`. Regardless, keep all
+  imported modules **side-effect-free** so the injection guard runs before any
+  bundler dependency initializes.
+- **Shadow-DOM style leakage** → CSS injected as exactly one `<style>` in the
+  shadow root; test asserts one host / one shadow root / one style / no global
+  sheet.
+- **MV3 CSP + source maps** [review] → external (non-`eval`) source maps in dev
+  only; no dynamic code generation emitted.
+- **Lazy vs permanent host** [review] → host stays **lazy-mounted on open, fully
+  unmounted on close** (current behavior); test repeated open/close and extension
+  reload, and detect/clean a stale host by ID.
+
+## 10. Resolved decisions (were open questions)
+1. **Framework:** framework-free (Option A) now; Preact re-evaluated later as a
+   separate, interaction-test-guarded change. [resolved per review]
+2. **Build output location:** emit `content.js`/`background.js` at the **repo
+   root** and **commit them**, so the unpacked install keeps working with no lost
+   storage; `src/` is the source of truth. [resolved per review]
+3. **Worker format:** bundled **classic IIFE**; no `"type":"module"` in the
+   manifest. [resolved per review]
+4. **TypeScript strictness:** `@ts-nocheck` through the verbatim/split phases,
+   turn on full `strict` in Phase 6.
+5. **Output filenames:** keep `content.js` / `background.js` — no manifest churn.
+6. **Unit tests:** **yes** — a Vitest layer for pure modules (`shared/url`,
+   `search/results`, `contexts` expiry, domain scoring) lands in Phase 0 and
+   grows with the split, alongside the Playwright e2e harness. [resolved per
+   review]
+
+### Remaining judgement calls for the human before we start
+- Confirm **framework-free** (vs still wanting Preact despite the risk).
+- Confirm committing built root artifacts is acceptable for this repo.
+- Confirm scope includes adding **Vitest + a committed Playwright harness**
+  (Phase 0) as part of this refactor.
