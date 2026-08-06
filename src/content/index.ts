@@ -9,6 +9,14 @@ import {
 } from "../shared/url";
 import { groupHex, groupTextColor, tintBg } from "../shared/colors";
 import { MSG } from "../shared/messages";
+import {
+  normalizeFavArray, buildSettingsExport, parseSettingsImport,
+} from "./settings";
+import {
+  matchesQuery, templateBase, underBase, hostOf, computeDomainScores,
+  bestDomainMatch as pickDomainMatch,
+} from "./search/matching";
+import { isToggleCombo, isUrlCombo } from "./keyboard/combos";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -60,12 +68,7 @@ import { MSG } from "../shared/messages";
   let contextTemporarilyExited = false; // one-shot "use the default space" for this bar open
 
   // ---- Favorites / shortcuts persistence -------------------------------------
-
-  function normalizeFavArray(arr) {
-    const out = new Array(FAV_COUNT).fill(null);
-    for (let i = 0; i < FAV_COUNT; i++) out[i] = (arr && arr[i]) || null;
-    return out;
-  }
+  // normalizeFavArray now lives in ./settings.
 
   chrome.storage.local.get([STORAGE_KEY, SHORTCUTS_KEY], (res) => {
     if (res && Array.isArray(res[STORAGE_KEY])) {
@@ -102,23 +105,8 @@ import { MSG } from "../shared/messages";
   }
 
   // ---- Settings export -------------------------------------------------------
-
-  // Serializes the durable user settings (favorites + keyword shortcuts) into a
-  // versioned JSON blob. Contexts are intentionally excluded — they're ephemeral
-  // and tied to live tab-group ids. A future /import reads this same shape.
-  function buildSettingsExport() {
-    return JSON.stringify(
-      {
-        type: "arc-search-settings",
-        version: EXPORT_VERSION,
-        exportedAt: new Date().toISOString(),
-        favorites,
-        shortcuts,
-      },
-      null,
-      2
-    );
-  }
+  // buildSettingsExport + parseSettingsImport now live in ./settings; the
+  // clipboard/file plumbing (downloadSettings, pickSettingsFile) stays here.
 
   // Fallback when the clipboard API is unavailable/denied: download the JSON.
   function downloadSettings(json) {
@@ -140,26 +128,7 @@ import { MSG } from "../shared/messages";
   }
 
   // Parses a /export JSON blob and returns the durable settings, or null if the
-  // shape/version isn't recognized. Tolerant of missing pieces.
-  function parseSettingsImport(text) {
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (_) {
-      return null;
-    }
-    if (!data || data.type !== "arc-search-settings") return null;
-    if (typeof data.version !== "number" || data.version > EXPORT_VERSION) {
-      return null;
-    }
-    const favs = Array.isArray(data.favorites)
-      ? normalizeFavArray(data.favorites)
-      : null;
-    const shorts =
-      data.shortcuts && typeof data.shortcuts === "object" ? data.shortcuts : null;
-    if (!favs && !shorts) return null;
-    return { favorites: favs, shortcuts: shorts };
-  }
+  // shape/version isn't recognized. Lives in ./settings (parseSettingsImport).
 
   // Fallback when the clipboard can't be read: prompt for a JSON file and hand
   // its text to `cb`.
@@ -328,7 +297,7 @@ import { MSG } from "../shared/messages";
         saveShortcuts();
       },
       exportSettings: () => {
-        const json = buildSettingsExport();
+        const json = buildSettingsExport(favorites, shortcuts);
         const shortcutCount = Object.keys(shortcuts).length;
         const favCount = favorites.filter(Boolean).length;
         const ok = () =>
@@ -871,29 +840,8 @@ import { MSG } from "../shared/messages";
   // ---- Open tabs + history results -------------------------------------------
 
   // TRACKING_PARAM + canon (URL de-dup key) now live in ../shared/url.
-
-  function matchesQuery(item, tokens) {
-    const hay = `${item.title || ""} ${item.url || ""}`.toLowerCase();
-    return tokens.every((t) => hay.includes(t));
-  }
-
+  // matchesQuery, templateBase, underBase now live in ./search/matching.
   // hostPath now lives in ../shared/url.
-
-  // The host/path an active shortcut's template resolves to (the part before %s),
-  // used to filter results to that destination (e.g. "https://go/%s" -> go, "").
-  function templateBase(template) {
-    let prefix = (template || "").split("%s")[0];
-    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(prefix)) prefix = "https://" + prefix;
-    return hostPath(prefix);
-  }
-
-  // True if a URL lives under a shortcut's base host + path prefix.
-  function underBase(u, base) {
-    const hp = hostPath(u);
-    if (!hp || hp.host !== base.host) return false;
-    if (base.path === "") return true;
-    return hp.path === base.path || hp.path.startsWith(base.path + "/");
-  }
 
   // No shortcut: empty query -> other open tabs; typing -> title/url matches in
   // open tabs then history. With a shortcut pill active: restrict to tabs/history
@@ -1211,52 +1159,16 @@ import { MSG } from "../shared/messages";
   }
 
   // ---- Inline URL autocomplete (ghost text) ----------------------------------
+  // hostOf + the pure domain ranking now live in ./search/matching.
 
-  function hostOf(u) {
-    try {
-      return new URL(u).host.replace(/^www\./i, "").toLowerCase();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // Score each visited host so autocomplete prefers open tabs, then frequently
-  // visited history.
   function buildDomainScores() {
-    const scores = new Map();
-    for (const t of openTabs) {
-      const h = hostOf(t.url);
-      if (h) scores.set(h, (scores.get(h) || 0) + 1000);
-    }
-    for (const it of historyItems) {
-      const h = hostOf(it.url);
-      if (h) scores.set(h, (scores.get(h) || 0) + (it.visitCount || 1));
-    }
-    domainScores = scores;
+    domainScores = computeDomainScores(openTabs, historyItems);
   }
 
-  // Returns the best visited base domain (host) the typed value is a prefix of,
-  // or null. Prefers root domains over subdomains, then most-used, then shortest.
+  // Wraps the pure ranking with the command/shortcut-mode suppression guard.
   function bestDomainMatch(value) {
-    if (!value || commandState || activeShortcut) return null;
-    if (/\s/.test(value) || value.startsWith("/")) return null;
-    const typed = value.replace(/^https?:\/\//i, "");
-    if (typed.includes("/")) return null;
-    const typedHost = typed.replace(/^www\./i, "").toLowerCase();
-    if (!typedHost) return null;
-    const cands = [];
-    for (const [host, score] of domainScores) {
-      if (host.length < typedHost.length || !host.startsWith(typedHost)) continue;
-      cands.push({ host, score, labels: host.split(".").length });
-    }
-    if (!cands.length) return null;
-    cands.sort(
-      (a, b) =>
-        a.labels - b.labels || // root domains before subdomains
-        b.score - a.score || // then most-used
-        a.host.length - b.host.length // then shortest
-    );
-    return cands[0].host;
+    if (commandState || activeShortcut) return null;
+    return pickDomainMatch(value, domainScores);
   }
 
   // The completion suffix shown as ghost text: completes a command name when
@@ -1313,20 +1225,7 @@ import { MSG } from "../shared/messages";
   }
 
   // ---- Key handling ----------------------------------------------------------
-
-  function isToggleCombo(e) {
-    return (
-      (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey &&
-      e.key.toLowerCase() === "t"
-    );
-  }
-
-  function isUrlCombo(e) {
-    return (
-      (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey &&
-      e.key.toLowerCase() === "l"
-    );
-  }
+  // isToggleCombo / isUrlCombo now live in ./keyboard/combos.
 
   function onKeyDown(e) {
     if (isToggleCombo(e)) {

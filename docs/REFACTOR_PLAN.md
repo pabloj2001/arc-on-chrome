@@ -376,11 +376,19 @@ incrementally so `dist/` is always loadable.
    Added 4 Vitest cases for the pure `parseExpiry`/`fmtRemaining`/`groupTitle`
    (24 unit total). typecheck clean; the 50-test Playwright harness — including
    the full context lifecycle + alarms — still passes against `dist/`.
-4. **Split `content/` logic only** — `state` (reducer + actions + effects),
-   `data`, `search`, `commands`, `keyboard`, `dispatch`, `lifecycle`. **Introduce
-   the reducer here with a thin compatibility renderer** that calls the existing
-   DOM render functions from declared effects, so state is designed **once**
-   (not redesigned in Phase 5). [review] Keep the single stable input node.
+4. **Split `content/` logic — 🚧 IN PROGRESS (incremental).** Per a mid-refactor
+   decision, we extract the cleanly-pure logic modules first (keeping the harness
+   green at each step) and introduce the reducer as a focused follow-up, rather
+   than rewriting the 2100-line closure in one pass. **Done so far:**
+   `content/settings.ts` (normalizeFavArray + buildSettingsExport/parseSettingsImport,
+   the pure JSON (de)serialization; clipboard/file plumbing stays in the entry),
+   `content/search/matching.ts` (matchesQuery, templateBase, underBase, hostOf,
+   computeDomainScores, and the pure `bestDomainMatch` ranking — the entry keeps a
+   thin guard wrapper), and `content/keyboard/combos.ts` (isToggleCombo/isUrlCombo).
+   The entry `import`s these; 17 new Vitest cases cover them (41 unit total).
+   typecheck clean; 50 e2e still green. **Remaining:** extract the command
+   registry/runner + data/index-client, then the reducer + effects with a
+   compatibility renderer (the original Phase 4/5 crux).
 5. **Rebuild the `ui/` layer** — port `STYLES` → `bar.css` (one `<style>` in the
    shadow root, asserted by test), turn the render functions into clean
    framework-free `render-*.ts` modules driven by the reducer's effects. DOM refs
