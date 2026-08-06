@@ -1,4 +1,11 @@
 // @ts-nocheck
+import {
+  CONTEXTS_KEY, ACTIVE_CONTEXT_KEY, CONTEXT_ALARM, DEFAULT_DURATION_MS,
+  GROUP_COLORS, MAX_CONTEXTS, WEB_URL,
+} from "../shared/constants";
+import { parseUrl, tabMatchesFavorite } from "../shared/url";
+import { MSG } from "../shared/messages";
+
 // Each command opens the same bar with different options:
 //   toggle-search-bar -> empty bar, Enter opens in a NEW tab
 //   open-url-bar       -> prefilled with the current URL, Enter replaces THIS tab
@@ -15,7 +22,7 @@ chrome.commands.onCommand.addListener((command) => {
     if (!tab || !tab.id) return;
     chrome.tabs.sendMessage(
       tab.id,
-      { type: "TOGGLE_ARC_SEARCH", ...opts },
+      { type: MSG.TOGGLE_ARC_SEARCH, ...opts },
       () => {
         // Swallow "receiving end does not exist" on pages where the content
         // script can't run (chrome:// pages, the web store, etc.).
@@ -30,17 +37,17 @@ chrome.commands.onCommand.addListener((command) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return;
   switch (message.type) {
-    case "ARC_SEARCH_SUBMIT":
+    case MSG.SEARCH_SUBMIT:
       if (message.url) {
         chrome.tabs.create({ url: message.url }, (tab) => {
           addTabToContext(tab, message.groupId);
         });
       }
       break;
-    case "ARC_OPEN_FAVORITE":
+    case MSG.OPEN_FAVORITE:
       if (message.url) focusOrCreateTab(message.url, message.groupId);
       break;
-    case "ARC_ACTIVATE_TAB":
+    case MSG.ACTIVATE_TAB:
       if (message.tabId != null) {
         chrome.tabs.update(message.tabId, { active: true });
         if (message.windowId != null) {
@@ -48,25 +55,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
       break;
-    case "ARC_SET_CONTEXT":
+    case MSG.SET_CONTEXT:
       setContext(sender, message.name, message.expiry, sendResponse);
       return true;
-    case "ARC_CLEAR_CONTEXT":
+    case MSG.CLEAR_CONTEXT:
       clearActiveContext(sendResponse);
       return true;
-    case "ARC_SWITCH_CONTEXT":
+    case MSG.SWITCH_CONTEXT:
       switchContext(message.groupId, sendResponse);
       return true;
-    case "ARC_DELETE_CONTEXT":
+    case MSG.DELETE_CONTEXT:
       deleteContext(message.name, sendResponse);
       return true;
-    case "ARC_GET_INDEX":
+    case MSG.GET_INDEX:
       getIndex(sender, sendResponse);
       return true; // keep the message channel open for the async response
   }
 });
-
-const WEB_URL = /^https?:\/\//i;
 
 // Builds the small index the bar searches: currently-open tabs plus the last
 // 7 days of history (capped). Only http(s) pages are included.
@@ -113,30 +118,7 @@ function getIndex(sender, sendResponse) {
   });
 }
 
-// Parses a URL into the parts we compare on: host without a leading "www.",
-// path without trailing slashes, and the query string.
-function parseUrl(u) {
-  try {
-    const x = new URL(u);
-    return {
-      host: x.host.replace(/^www\./i, "").toLowerCase(),
-      path: x.pathname.replace(/\/+$/, ""),
-      search: x.search,
-    };
-  } catch (_) {
-    return null;
-  }
-}
-
-// A tab matches a favorite when they share a host and the favorite's path is a
-// prefix of the tab's path. This means a bare-domain favorite (e.g.
-// gemini.google.com) matches the tab it redirects to (gemini.google.com/app),
-// while a favorite with a path only matches tabs under that path.
-function tabMatchesFavorite(fav, tab) {
-  if (!fav || !tab || fav.host !== tab.host) return false;
-  if (fav.path === "" || fav.path === tab.path) return true;
-  return tab.path === fav.path || tab.path.startsWith(fav.path + "/");
-}
+// parseUrl + tabMatchesFavorite now live in ../shared/url.
 
 // If a tab already shows the favorite (exact URL preferred, else same-host
 // prefix), focus it (and its window); otherwise open the URL in a new tab
@@ -165,17 +147,8 @@ function focusOrCreateTab(url, groupId) {
 }
 
 // ---- Contexts (ephemeral tab groups) ---------------------------------------
-
-const CONTEXTS_KEY = "arcContexts"; // [{ groupId, name, color, durationMs, lastActiveAt }]
-const ACTIVE_CONTEXT_KEY = "arcActiveContextId"; // groupId | null
-const CONTEXT_ALARM = "arc-context-check";
-const DEFAULT_DURATION_MS = 24 * 60 * 60 * 1000;
-// Color names to cycle contexts through. Limited to colors whose Edge hex we
-// map confidently (Edge's Fluent palette has no true red/green), so the bar's
-// pill color always matches the tab-strip chip.
-const GROUP_COLORS = [
-  "blue", "purple", "pink", "cyan", "orange", "yellow", "grey",
-];
+// CONTEXTS_KEY, ACTIVE_CONTEXT_KEY, CONTEXT_ALARM, DEFAULT_DURATION_MS,
+// GROUP_COLORS, and MAX_CONTEXTS now live in ../shared/constants.
 
 function getContexts() {
   return new Promise((resolve) =>
@@ -253,8 +226,6 @@ function groupTitle(ctx, now) {
   const remaining = ctx.durationMs - (now - ctx.lastActiveAt);
   return `${ctx.name} [${fmtRemaining(remaining)}]`;
 }
-
-const MAX_CONTEXTS = 5;
 
 // Creates a group from the sender's current tab, tracks it, and makes it active.
 async function setContext(sender, name, expiry, sendResponse) {

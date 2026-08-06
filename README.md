@@ -172,19 +172,23 @@ recommended.
 
 ## Tests
 
-An end-to-end suite (Playwright) exercises the bar's behavior against the real extension:
+Two layers: fast **Vitest** unit tests for the pure `src/shared/` helpers, and an
+end-to-end **Playwright** suite that exercises the bar against the real (built) extension:
 
 ```
 npm install
 npx playwright install chromium   # one-time
-npm test                          # runs headless (no windows)
+npm run build                     # compile src/ -> dist/ (what the tests load)
+npm run test:unit                 # Vitest: shared url/color helpers
+npm test                          # Playwright, headless (no windows)
 HEADED=1 npm test                 # watch it drive a visible browser
 ```
 
-The tests load the unpacked extension into Chromium's new headless mode (which supports
-extensions), serve their own pages from a local HTTP server (no internet dependency), and cover
-search/URL modes, favorites, keyword shortcuts, the results list + inline autocomplete, the
-command palette + param pills, contexts, keyboard/focus behavior, and `/export`. They live in
+`npm test` builds first (via `pretest`) and loads the unpacked extension from `dist/` into
+Chromium's new headless mode (which supports extensions), serving its own pages from a local
+HTTP server (no internet dependency). It covers search/URL modes, favorites, keyword shortcuts,
+the results list + inline autocomplete, the command palette + param pills, contexts,
+keyboard/focus behavior, and `/export` + `/import`. Unit tests live in `tests/unit/`, e2e in
 `tests/e2e/`.
 
 ## Files

@@ -355,8 +355,16 @@ incrementally so `dist/` is always loadable.
    IIFE wrapper hid the worker's top-level `setContext`, so it is re-exposed on
    `self` for the harness. Shipped the **`/import`** command (clipboard →
    file-picker → pasted-arg) so settings survive the extension-id change.
-2. **Extract `shared/`** — pull `url`, `colors`, `constants` (incl. storage keys),
-   `messages` out of both files; de-duplicate. Add Vitest for the pure helpers.
+2. **Extract `shared/` — ✅ DONE.** Pulled `url` (parseUrl, tabMatchesFavorite,
+   normalizeUrl, buildUrl, applyShortcut, faviconUrl, canon, hostPath,
+   looksLikeNavigable, schemeFor, ensureScheme), `colors` (group hex maps +
+   isDarkScheme/groupHex/groupTextColor/tintBg/hexToRgb), `constants` (storage
+   keys + tunables + GROUP_COLORS + alarm/duration + WEB_URL), and `messages`
+   (the `MSG` wire-string map) out of both bundles and de-duplicated the two
+   former copies of `parseUrl`. Both entry files now `import` from `../shared/*`.
+   Added Vitest (`npm run test:unit`, `tests/unit/`) with 20 tests for the pure
+   url + color helpers. `npm run typecheck` is clean; the 50-test Playwright
+   harness still passes against `dist/`.
 3. **Split `background/`** into the module tree (§5), `contexts.ts` cohesive.
    Verify context lifecycle + alarms + worker-restart via the harness.
 4. **Split `content/` logic only** — `state` (reducer + actions + effects),

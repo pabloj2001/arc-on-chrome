@@ -1,4 +1,15 @@
 // @ts-nocheck
+import {
+  STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS, MAX_CONTEXTS,
+  HOST_ID, EXPORT_VERSION,
+} from "../shared/constants";
+import {
+  normalizeUrl, buildUrl, applyShortcut, faviconUrl, canon, hostPath,
+  looksLikeNavigable,
+} from "../shared/url";
+import { groupHex, groupTextColor, tintBg } from "../shared/colors";
+import { MSG } from "../shared/messages";
+
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
   // URL navigation targeting the real tab.
@@ -6,12 +17,6 @@
   if (window.__arcSearchInjected) return;
   window.__arcSearchInjected = true;
 
-  const HOST_ID = "arc-search-bar-host";
-  const FAV_COUNT = 8;
-  const STORAGE_KEY = "arcFavorites";
-  const SHORTCUTS_KEY = "arcShortcuts";
-  const MAX_RESULTS = 10;
-  const MAX_CONTEXTS = 5;
   const ICON_SEARCH =
     '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
   const ICON_BACK =
@@ -53,41 +58,6 @@
   let contextsList = []; // all tracked contexts [{ groupId, name, color }]
   let currentTabGroupId = -1; // group id of the tab the bar was opened over (-1 = none)
   let contextTemporarilyExited = false; // one-shot "use the default space" for this bar open
-
-  // Tab-group colors as rendered by Microsoft Edge (Fluent palette), sampled
-  // from Edge's own color picker. The tabGroups API only exposes color NAMES,
-  // so we map them to Edge's hexes to match the tab-strip chip. Light mode.
-  const GROUP_COLOR_HEX = {
-    grey: "#706d6b", blue: "#296eeb", cyan: "#038387", yellow: "#99700c",
-    orange: "#ca5010", pink: "#e3008c", purple: "#8230ff",
-    // Not used in the rotation (Edge has no true red/green); best-effort so any
-    // pre-existing group of these names still shows an Edge palette color.
-    red: "#c239b3", green: "#004e8c",
-  };
-  // Dark-mode tints (approximate; refined once sampled on a dark tab strip).
-  const GROUP_COLOR_HEX_DARK = {
-    grey: "#c8c6c4", blue: "#7aa5f5", cyan: "#4bb6ba", yellow: "#d9b12a",
-    orange: "#e8895a", pink: "#ff5aa8", purple: "#b48aff",
-    red: "#d873c9", green: "#4a86bf",
-  };
-
-  function isDarkScheme() {
-    return (
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-    );
-  }
-
-  function groupHex(color) {
-    const map = isDarkScheme() ? GROUP_COLOR_HEX_DARK : GROUP_COLOR_HEX;
-    return map[color] || (isDarkScheme() ? "#c8d3ff" : "#325ccd");
-  }
-
-  // Readable text color to place on a group-colored pill (dark text on the light
-  // dark-mode tints, white on the saturated light-mode colors).
-  function groupTextColor() {
-    return isDarkScheme() ? "#202124" : "#fff";
-  }
 
   // ---- Favorites / shortcuts persistence -------------------------------------
 
@@ -132,8 +102,6 @@
   }
 
   // ---- Settings export -------------------------------------------------------
-
-  const EXPORT_VERSION = 1;
 
   // Serializes the durable user settings (favorites + keyword shortcuts) into a
   // versioned JSON blob. Contexts are intentionally excluded — they're ephemeral
@@ -219,79 +187,8 @@
   }
 
   // ---- URL helpers -----------------------------------------------------------
-
-  const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
-  // Intranet-style path, e.g. "go/glean" or "wiki/Main_Page" (single label + /).
-  const INTRANET_PATH = /^[a-z0-9-]+\/\S*/i;
-
-  // True when the whole (single-token) string is a URL/host on its own.
-  function looksLikeNavigable(q) {
-    const s = q.trim();
-    if (!s || /\s/.test(s)) return false; // spaces handled separately below
-    if (HAS_SCHEME.test(s)) return true;
-    if (/^localhost(:\d+)?([/?#]|$)/i.test(s)) return true;
-    if (/^\d{1,3}(\.\d{1,3}){3}([:/?#]|$)/.test(s)) return true; // IPv4
-    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?([/?#]|$)/i.test(s)) return true; // dotted domain
-    if (/^[a-z0-9-]+:\d+([/?#]|$)/i.test(s)) return true; // host:port
-    if (INTRANET_PATH.test(s)) return true; // go/foo
-    return false;
-  }
-
-  function schemeFor(s) {
-    const host = s.split(/[/?#\s]/)[0].split(":")[0];
-    return host.includes(".") ? "https" : "http";
-  }
-
-  // Builds a fully-encoded URL from raw input. Single-label hosts (go, localhost)
-  // use http:// so corporate redirectors resolve; dotted/public hosts use https.
-  // The URL constructor encodes spaces and other unsafe characters, so queries
-  // like "go/glean my search" become http://go/glean%20my%20search.
-  function normalizeUrl(u) {
-    const s = (u || "").trim();
-    if (!s) return null;
-    const full = HAS_SCHEME.test(s) ? s : `${schemeFor(s)}://${s}`;
-    try {
-      return new URL(full).href;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // Resolves user input to a URL that opens in a tab. If the input is (or starts
-  // with) a navigable host/path — including intranet links with a trailing query
-  // like "go/glean cats" — the whole thing is handed to the browser as a URL;
-  // otherwise it becomes a search.
-  function buildUrl(query) {
-    const q = query.trim();
-    if (!q) return null;
-    if (looksLikeNavigable(q)) return normalizeUrl(q);
-    const first = q.split(/\s+/)[0];
-    if (HAS_SCHEME.test(first) || INTRANET_PATH.test(first)) {
-      return normalizeUrl(q);
-    }
-    return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
-  }
-
-  function faviconUrl(pageUrl) {
-    return chrome.runtime.getURL(
-      `_favicon/?pageUrl=${encodeURIComponent(pageUrl)}&size=64`
-    );
-  }
-
-  function ensureScheme(u) {
-    return HAS_SCHEME.test(u) ? u : `${schemeFor(u)}://${u}`;
-  }
-
-  // Substitutes the query into a shortcut template. `%s` is replaced with the
-  // URL-encoded query; templates without `%s` get the query appended.
-  function applyShortcut(template, query) {
-    const q = (query || "").trim();
-    const enc = encodeURIComponent(q);
-    const url = template.includes("%s")
-      ? template.replace(/%s/g, enc)
-      : template + enc;
-    return ensureScheme(url);
-  }
+  // parseUrl/normalizeUrl/buildUrl/applyShortcut/faviconUrl/canon/hostPath and
+  // the looksLikeNavigable predicate now live in ../shared/url.
 
   // ---- Command system --------------------------------------------------------
   // Add a command by adding an entry here: `name`, `description`, a `params`
@@ -487,7 +384,7 @@
       },
       setContext: (name, expiry) => {
         chrome.runtime.sendMessage(
-          { type: "ARC_SET_CONTEXT", name, expiry },
+          { type: MSG.SET_CONTEXT, name, expiry },
           (res) => {
             if (chrome.runtime.lastError || !res) return;
             if (!res.ok) {
@@ -509,7 +406,7 @@
         );
       },
       clearContext: () => {
-        chrome.runtime.sendMessage({ type: "ARC_CLEAR_CONTEXT" }, () => {
+        chrome.runtime.sendMessage({ type: MSG.CLEAR_CONTEXT }, () => {
           void chrome.runtime.lastError;
         });
         activeContext = null;
@@ -518,7 +415,7 @@
       },
       deleteContext: (name) => {
         chrome.runtime.sendMessage(
-          { type: "ARC_DELETE_CONTEXT", name },
+          { type: MSG.DELETE_CONTEXT, name },
           (res) => {
             if (chrome.runtime.lastError || !res) return;
             if (!res.ok) {
@@ -702,23 +599,7 @@
     }
   }
 
-  // A very faint version of the context color for the bar background, layered
-  // over the bar's normal near-opaque surface so it stays readable in both modes.
-  function tintBg(hex) {
-    const dark = isDarkScheme();
-    const base = dark ? "rgba(30,30,33,0.98)" : "rgba(250,250,252,0.98)";
-    const rgb = hexToRgb(hex);
-    if (!rgb) return base;
-    const a = dark ? 0.14 : 0.08;
-    return `linear-gradient(rgba(${rgb.r},${rgb.g},${rgb.b},${a}), rgba(${rgb.r},${rgb.g},${rgb.b},${a})), ${base}`;
-  }
-
-  function hexToRgb(hex) {
-    const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
-    if (!m) return null;
-    const n = parseInt(m[1], 16);
-    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-  }
+  // tintBg/hexToRgb now live in ../shared/colors.
 
   // One-shot: leave the context for this bar session so the next tab opens in the
   // default space. The context stays active and returns when the bar reopens.
@@ -800,7 +681,7 @@
   // the bar stays open and its pill/border update.
   function switchContextByGroupId(groupId) {
     chrome.runtime.sendMessage(
-      { type: "ARC_SWITCH_CONTEXT", groupId },
+      { type: MSG.SWITCH_CONTEXT, groupId },
       (res) => {
         if (chrome.runtime.lastError || !res || !res.ok) return;
         activeContext = res.activeContext || null;
@@ -812,7 +693,7 @@
   }
 
   function switchContextToDefault() {
-    chrome.runtime.sendMessage({ type: "ARC_CLEAR_CONTEXT" }, () => {
+    chrome.runtime.sendMessage({ type: MSG.CLEAR_CONTEXT }, () => {
       void chrome.runtime.lastError;
     });
     activeContext = null;
@@ -989,50 +870,14 @@
 
   // ---- Open tabs + history results -------------------------------------------
 
-  // Query params that only affect tracking/analytics and shouldn't make two
-  // otherwise-identical URLs count as different pages.
-  const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|gclsrc$|dclid$|msclkid$|mc_eid$|mc_cid$|igshid$|ref$|ref_src$|ref_url$|spm$|yclid$|_hsenc$|_hsmi$|_openstat$|si$)/i;
-
-  // Canonical key for de-duplication: host without "www.", path without a
-  // trailing slash, and the query with tracking params dropped and the rest
-  // sorted so param order doesn't matter. Scheme and hash are ignored.
-  function canon(u) {
-    try {
-      const x = new URL(u);
-      const kept = [];
-      for (const [k, v] of new URLSearchParams(x.search)) {
-        if (!TRACKING_PARAM.test(k)) kept.push([k, v]);
-      }
-      kept.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      const qs = kept.length
-        ? "?" + kept.map(([k, v]) => `${k}=${v}`).join("&")
-        : "";
-      return (
-        x.host.replace(/^www\./i, "") +
-        x.pathname.replace(/\/+$/, "") +
-        qs
-      ).toLowerCase();
-    } catch (_) {
-      return (u || "").toLowerCase();
-    }
-  }
+  // TRACKING_PARAM + canon (URL de-dup key) now live in ../shared/url.
 
   function matchesQuery(item, tokens) {
     const hay = `${item.title || ""} ${item.url || ""}`.toLowerCase();
     return tokens.every((t) => hay.includes(t));
   }
 
-  function hostPath(u) {
-    try {
-      const x = new URL(u);
-      return {
-        host: x.host.replace(/^www\./i, "").toLowerCase(),
-        path: x.pathname.replace(/\/+$/, ""),
-      };
-    } catch (_) {
-      return null;
-    }
-  }
+  // hostPath now lives in ../shared/url.
 
   // The host/path an active shortcut's template resolves to (the part before %s),
   // used to filter results to that destination (e.g. "https://go/%s" -> go, "").
@@ -1307,7 +1152,7 @@
     if (r.type === "tab") {
       // Switching to an already-open tab is the sensible action in both modes.
       chrome.runtime.sendMessage({
-        type: "ARC_ACTIVATE_TAB",
+        type: MSG.ACTIVATE_TAB,
         tabId: r.tabId,
         windowId: r.windowId,
       });
@@ -1322,7 +1167,7 @@
       if (opensInCurrentTab) location.assign(r.url);
       else
         chrome.runtime.sendMessage({
-          type: "ARC_SEARCH_SUBMIT",
+          type: MSG.SEARCH_SUBMIT,
           url: r.url,
           groupId: contextGroupIdForDispatch(),
         });
@@ -1330,7 +1175,7 @@
       location.assign(r.url); // cmd+L: replace the current page
     } else {
       chrome.runtime.sendMessage({
-        type: "ARC_OPEN_FAVORITE",
+        type: MSG.OPEN_FAVORITE,
         url: r.url,
         groupId: contextGroupIdForDispatch(),
       });
@@ -1338,7 +1183,7 @@
   }
 
   function loadIndex() {
-    chrome.runtime.sendMessage({ type: "ARC_GET_INDEX" }, (res) => {
+    chrome.runtime.sendMessage({ type: MSG.GET_INDEX }, (res) => {
       if (chrome.runtime.lastError || !res) return;
       openTabs = res.tabs || [];
       historyItems = res.history || [];
@@ -1725,7 +1570,7 @@
     const groupId = contextGroupIdForDispatch();
     close();
     // Switch to an existing tab with this URL if one is open, else new tab.
-    chrome.runtime.sendMessage({ type: "ARC_OPEN_FAVORITE", url, groupId });
+    chrome.runtime.sendMessage({ type: MSG.OPEN_FAVORITE, url, groupId });
   }
 
   function renderFavorites() {
@@ -2194,7 +2039,7 @@
     if (opensInCurrentTab) {
       location.assign(url);
     } else {
-      chrome.runtime.sendMessage({ type: "ARC_SEARCH_SUBMIT", url, groupId });
+      chrome.runtime.sendMessage({ type: MSG.SEARCH_SUBMIT, url, groupId });
     }
   }
 
@@ -2252,7 +2097,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message && message.type === "TOGGLE_ARC_SEARCH") {
+    if (message && message.type === MSG.TOGGLE_ARC_SEARCH) {
       toggle({
         opensInCurrentTab: !!message.opensInCurrentTab,
         defaultUrl: message.useCurrentUrl ? location.href : "",
