@@ -50,6 +50,7 @@
   let navigating = false; // true while previewing a highlighted suggestion's URL
   let activeContext = null; // { groupId, name, color } or null
   let contextsList = []; // all tracked contexts [{ groupId, name, color }]
+  let currentTabGroupId = -1; // group id of the tab the bar was opened over (-1 = none)
   let contextTemporarilyExited = false; // one-shot "use the default space" for this bar open
 
   // Tab-group colors as rendered by Microsoft Edge (Fluent palette), sampled
@@ -1183,8 +1184,18 @@
       openTabs = res.tabs || [];
       historyItems = res.history || [];
       currentTabId = res.currentTabId != null ? res.currentTabId : null;
+      currentTabGroupId =
+        res.currentTabGroupId != null ? res.currentTabGroupId : -1;
       activeContext = res.activeContext || null;
       contextsList = res.contexts || [];
+      // cmd+L acts on the current tab, so show the context that tab actually
+      // lives in (a different group than the selected context, or default when
+      // the tab isn't in a tracked context) rather than the globally-active one.
+      if (opensInCurrentTab) {
+        activeContext =
+          contextsList.find((c) => c.groupId === currentTabGroupId) || null;
+        contextTemporarilyExited = false;
+      }
       buildDomainScores();
       if (isOpen) {
         renderContext();
@@ -1510,6 +1521,16 @@
       // Empty query + backspace removes the pill and restores the alias word.
       e.preventDefault();
       dismissShortcutPill();
+    } else if (
+      e.key === "Backspace" &&
+      contextActive() &&
+      input &&
+      input.value === ""
+    ) {
+      // Empty bar + backspace inside a context temporarily exits it (like ←),
+      // so the next tab opens in the default space.
+      e.preventDefault();
+      exitContextTemporarily();
     }
   }
 

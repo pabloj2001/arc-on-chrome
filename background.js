@@ -97,6 +97,10 @@ function getIndex(sender, sendResponse) {
         getContextState((state) => {
           sendResponse({
             currentTabId: sender.tab && sender.tab.id,
+            currentTabGroupId:
+              sender.tab && sender.tab.groupId != null
+                ? sender.tab.groupId
+                : -1,
             tabs: openTabs,
             history,
             activeContext: state.activeContext, // { groupId, name, color } or null

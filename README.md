@@ -56,8 +56,11 @@ A row above the bar shows the **default space** and each context as numbered chi
 match the tab group), plus a **+** chip to create a new one. Switch with a click or
 **Ctrl+1** (default), **Ctrl+2** (first context), … ; **Ctrl++** opens the new-context command.
 While a context is active the bar's border, search icon, and a faint background tint take on the
-group's color. Press **← (Left arrow)** at the start of the input to *temporarily* leave the
-context so the next tab opens in the default space; it returns the next time you open the bar.
+group's color. Press **← (Left arrow)** at the start of the input — or **Backspace** while the
+bar is empty — to *temporarily* leave the context so the next tab opens in the default space; it
+returns the next time you open the bar. Opening the bar with the **URL shortcut (Cmd+L)** shows
+the context of the *current tab* (the group it belongs to, or the default space if it isn't in a
+context) instead of the globally-active one, since that command acts on the current tab.
 
 Contexts are tracked in `chrome.storage.local` and survive browser restarts. A background alarm
 checks every minute: it closes + untracks expired groups and refreshes the remaining-time in
