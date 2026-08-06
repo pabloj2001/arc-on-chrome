@@ -365,8 +365,17 @@ incrementally so `dist/` is always loadable.
    Added Vitest (`npm run test:unit`, `tests/unit/`) with 20 tests for the pure
    url + color helpers. `npm run typecheck` is clean; the 50-test Playwright
    harness still passes against `dist/`.
-3. **Split `background/`** into the module tree (§5), `contexts.ts` cohesive.
-   Verify context lifecycle + alarms + worker-restart via the harness.
+3. **Split `background/` — ✅ DONE.** Broke the worker monolith into the module
+   tree: `commands.ts` (chrome.commands routing), `router.ts` (onMessage switch →
+   handlers, `return true` per async reply), `index-builder.ts` (getIndex),
+   `favorites.ts` (focusOrCreateTab), and a cohesive `contexts.ts` (storage +
+   create/clear/switch/delete + tab-activity reset + expiry/alarms/tick). `index.ts`
+   is now a thin entry that registers ALL listeners synchronously at module top
+   (commands, onMessage, tabs.onActivated, alarms.onAlarm, onStartup/onInstalled)
+   before any await, then `ensureAlarm()` and the `self.setContext` test bridge.
+   Added 4 Vitest cases for the pure `parseExpiry`/`fmtRemaining`/`groupTitle`
+   (24 unit total). typecheck clean; the 50-test Playwright harness — including
+   the full context lifecycle + alarms — still passes against `dist/`.
 4. **Split `content/` logic only** — `state` (reducer + actions + effects),
    `data`, `search`, `commands`, `keyboard`, `dispatch`, `lifecycle`. **Introduce
    the reducer here with a thin compatibility renderer** that calls the existing
