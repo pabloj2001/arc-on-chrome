@@ -3,16 +3,18 @@
 Status: **REVISED after review — ready to execute pending final sign-off**
 Branch: `refactor/modular-architecture`
 
-> **Review incorporated.** A separate reviewer critiqued the first draft. The
-> blocking items changed five decisions, now baked into the sections below:
-> (1) **framework-free** for this refactor — Preact is deferred to a separate,
-> test-guarded change (§2); (2) **build into the repo root**, not `dist/`, to
-> preserve the unpacked extension's identity and `chrome.storage` (§3); (3)
-> the service worker ships as a **bundled classic IIFE** (§3); (4) the content
-> state model is a **reducer + explicit imperative-effects layer + generation
-> IDs**, not a generic reactive store (§6); (5) a **committed Playwright + Vitest
-> baseline is Phase 0**, established green against the *current* files before any
-> code moves (§8). Remaining review notes are tracked inline as **[review]**.
+> **Review incorporated + user decisions.** A separate reviewer critiqued the
+> first draft. The decisions now baked in: (1) **framework-free** for this
+> refactor — Preact is deferred to a separate, test-guarded change (§2); (2)
+> **build into a new `dist/` directory** — this changes the unpacked extension's
+> id on first load (constant thereafter), so settings are migrated with the new
+> **`/export`** command (and a later `/import`) rather than by keeping the load
+> path (§3); (3) the service worker ships as a **bundled classic IIFE** (§3);
+> (4) the content state model is a **reducer + explicit imperative-effects layer
+> + generation IDs**, not a generic reactive store (§6); (5) a **committed
+> Playwright baseline is Phase 0**, established green against the *current* files
+> before any code moves (§8 — DONE: 48 e2e tests, run headless via
+> `--headless=new`). Remaining review notes are tracked inline as **[review]**.
 
 ## 1. Goal & constraints
 
@@ -84,33 +86,28 @@ For reference, the options considered:
 ## 3. Build tooling
 
 - **Bundler: `esbuild`.** Two entry points → two **classic IIFE** outputs. Fast
-  (<50ms), trivial config, first-class TS, CSS `text` loader. (Vite + `crxjs` is
-  the heavier alternative; esbuild is enough since our manifest is static.)
-- **Build into the REPO ROOT, not a separate `dist/`.** [review — blocking]
-  Chrome derives an unpacked extension's ID from its load path; loading a
-  different directory would spawn a *second* extension with empty
-  `chrome.storage` (losing favorites/shortcuts/contexts) and duplicate command
-  bindings. So the load directory stays the repo root and the build **emits
-  `content.js` and `background.js` at the root** (overwriting the files that are
-  now the hand-written source). Source moves under `src/`; the root `.js` files
-  become build artifacts.
+  (<50ms), trivial config, first-class TS, CSS `text` loader.
+- **Build into a new `dist/` directory.** [user decision] The unpacked extension
+  is loaded from `dist/`, so `src/` holds only source. This **changes the
+  extension id on first load** (Chrome derives it from the load path), which
+  resets `chrome.storage` for the new id — accepted, because the id stays
+  constant on every load afterward, and settings are migrated explicitly:
+  - **Migration path:** the new **`/export`** command (shipped now, pre-rework)
+    copies favorites + shortcuts to the clipboard as versioned JSON; a later
+    **`/import`** reads that JSON back. So the user exports from the old
+    (root-loaded) extension, loads the new `dist/` build, and imports. Contexts
+    are ephemeral and excluded from export.
 - **Outputs (both bundled, `bundle: true`, `splitting: false`):**
-  - `src/content/index.ts` → `./content.js` — `format: "iife"`, single file, CSS inlined as a string.
-  - `src/background/index.ts` → `./background.js` — **`format: "iife"` (classic worker)**, so the manifest needs **no `"type": "module"`** and top-level listeners register synchronously. [review — blocking: format was ambiguous; fixed]
-  - `manifest.json` stays at the root, unchanged, still referencing `content.js` / `background.js`.
-- **Dev vs prod modes.** [review] `npm run dev` = esbuild `--watch`, **unminified + external source maps** (`sourcemap: "external"`, no `eval`-based maps — MV3 CSP forbids them). `npm run build` = `minify: true`, no source maps. `npm run typecheck` = `tsc --noEmit`. Explicit `target` (e.g. `chrome120`); no dynamic code generation emitted.
-- **Load target is unchanged (repo root).** The existing unpacked install keeps
-  working across the cutover — no re-add, no lost storage. This is verified in
-  Phase 0/1 (favorites, shortcuts, contexts survive the first build).
+  - `src/content/index.ts` → `dist/content.js` — `format: "iife"`, single file, CSS inlined as a string.
+  - `src/background/index.ts` → `dist/background.js` — **`format: "iife"` (classic worker)**, so `dist/manifest.json` needs **no `"type": "module"`** and top-level listeners register synchronously.
+  - `manifest.json` (+ `_favicon` usage etc.) is copied into `dist/`, still referencing `content.js` / `background.js`.
+- **Dev vs prod modes.** [review] `npm run dev` = esbuild `--watch`, **unminified + external source maps** (`sourcemap: "external"`, no `eval`-based maps — MV3 CSP forbids them); load `dist/` unpacked. `npm run build` = `minify: true`, no source maps. `npm run typecheck` = `tsc --noEmit`. Explicit `target` (e.g. `chrome120`); no dynamic code generation emitted.
+- **`dist/` is git-ignored** (build artifact); `src/` is the source of truth. A
+  README note documents `npm run build` before loading.
 - **CSS:** the ~200-line `STYLES` template string becomes `bar.css`, imported via
   the esbuild `text` loader and injected as **exactly one** `<style>` in the
-  shadow root. [review] A test asserts: one host, one shadow root, one `<style>`,
-  and no global/emitted stylesheet.
-- **Source layout is committed; build artifacts are committed too.** [review /
-  open-Q resolved] Since the load dir is the repo root, `content.js` and
-  `background.js` (built) are committed so the extension stays loadable without a
-  build. `src/` is the source of truth; a note in the README and a build check
-  (below) keep them from drifting. `node_modules/` stays ignored.
+  shadow root. [review] A test asserts one host / one shadow root / one `<style>`
+  / no global sheet.
 
 ## 4. Feature inventory (what must survive the move)
 
@@ -160,18 +157,19 @@ F. **Alarms & tab events** — 1-min tick (`tickContexts`), `onActivated`
 
 ```
 arc-search-extension/
-├─ manifest.json                 # root, unchanged — still points at content.js / background.js
-├─ content.js                    # BUILD OUTPUT (committed) — bundled IIFE, loaded by manifest
-├─ background.js                 # BUILD OUTPUT (committed) — bundled classic worker
-├─ content.js.map, background.js.map   # dev only, git-ignored
-├─ package.json                  # scripts + devDeps (esbuild, typescript, vitest, playwright)
+├─ manifest.json                 # source manifest (copied into dist/ at build)
+├─ package.json                  # scripts + devDeps (esbuild, typescript, vitest, @playwright/test)
 ├─ tsconfig.json
 ├─ build.mjs                     # esbuild config (2 entry points, css text loader, dev/prod)
+├─ dist/                         # BUILD OUTPUT (git-ignored) — the loaded extension
+│  ├─ manifest.json              # copied; references content.js / background.js
+│  ├─ content.js                 # bundled IIFE (+ .map in dev)
+│  └─ background.js              # bundled classic worker (+ .map in dev)
 ├─ docs/
 │  └─ REFACTOR_PLAN.md
 ├─ tests/
 │  ├─ unit/                      # Vitest: pure modules (shared/url, search/results, contexts/expiry…)
-│  └─ e2e/                       # Playwright smoke/regression harness (committed baseline)
+│  └─ e2e/                       # Playwright regression harness (committed baseline — DONE, 48 tests)
 └─ src/
    ├─ shared/                    # imported by BOTH bundles (kills current duplication)
    │  ├─ messages.ts             # Message REQUEST + RESPONSE unions + runtime validators (§7)
@@ -327,30 +325,33 @@ type Responses = {
 
 ## 8. Execution phases
 
-Each phase ends **green**: `npm run build` succeeds, the extension still loads
-from the repo root (same install, storage intact), Vitest passes, and the
-committed Playwright harness passes. We migrate incrementally so the root
-`content.js`/`background.js` are always loadable.
+Each phase ends **green**: `npm run build` succeeds, the extension loads from
+`dist/`, Vitest passes, and the committed Playwright harness passes. We migrate
+incrementally so `dist/` is always loadable.
 
-0. **Baseline harness (before any code moves).** [review — blocking] Commit the
-   Playwright e2e harness (the flows used this session) plus a first Vitest set,
-   and record them **green against the current root files**. Cover the
-   behavior-sensitive spots: caret/selection + ghost autocomplete, param-pill
-   mode + width, propagation blocking (Vimium coexistence), Escape/Enter/arrow
-   nav, favorites focus-or-create, context create/switch/temp-exit/expiry,
-   `Cmd+L` current-tab context, and **service-worker restart** between messages.
-   Note which checks require manual Chrome/Edge verification (command shortcuts,
-   Fluent tab-group colors).
-1. **Scaffold build (verbatim move).** Add `package.json`, `tsconfig.json`,
-   `build.mjs`, devDeps (esbuild, typescript, vitest). Create
-   `src/content/index.ts` + `src/background/index.ts` containing the *current*
-   code moved verbatim (as `.ts` with `// @ts-nocheck`). Register all
-   listeners synchronously at module top (before any `await`). [review] Build to
-   the **repo root** `content.js`/`background.js`. **Verify the existing unpacked
-   install still works and storage is intact** (favorites/shortcuts/contexts).
-   No logic split yet.
+0. **Baseline harness — ✅ DONE (this checkpoint).** Committed a Playwright e2e
+   harness of **48 tests** covering the behavior-sensitive spots we tuned:
+   search/url modes, favorites focus-or-create + empty-slot styling, shortcut
+   pills (arm/dismiss, `%s`, the shortcut-Enter + history-routing regressions,
+   scoped results, search-as-2nd-result), results/domain/ghost autocomplete +
+   root-domain preference + many-open-tabs search fix, command palette + param
+   pills (Tab-only advance, Shift+Tab first-param no-op, required-flash),
+   contexts (row numbering, Ctrl+1/2 switch, ← / empty-Backspace temp-exit,
+   back-arrow, `Cmd+L` current-tab context, join-group, limit 5), keyboard
+   (Escape, focus, backdrop, propagation blocking), and the new `/export`. Runs
+   **windowless** via Chromium `--headless=new` (`npm test`; `HEADED=1` to
+   watch). A Vitest layer for pure modules is added as those modules are
+   extracted (Phase 2+). Still **manual** in Chrome/Edge: OS-level command
+   shortcuts and Fluent tab-group colors.
+1. **Scaffold build (verbatim move).** Add `tsconfig.json`, `build.mjs`, devDeps
+   (esbuild, typescript, vitest). Create `src/content/index.ts` +
+   `src/background/index.ts` containing the *current* code moved verbatim (as
+   `.ts` with `// @ts-nocheck`). Register all listeners synchronously at module
+   top (before any `await`). [review] Build to **`dist/`**; copy `manifest.json`.
+   **Load `dist/` unpacked, `/import` the settings exported from the old build,**
+   and confirm the Playwright harness passes against `dist/`.
 2. **Extract `shared/`** — pull `url`, `colors`, `constants` (incl. storage keys),
-   `messages` out of both files; de-duplicate. Typecheck.
+   `messages` out of both files; de-duplicate. Add Vitest for the pure helpers.
 3. **Split `background/`** into the module tree (§5), `contexts.ts` cohesive.
    Verify context lifecycle + alarms + worker-restart via the harness.
 4. **Split `content/` logic only** — `state` (reducer + actions + effects),
@@ -363,17 +364,19 @@ committed Playwright harness passes. We migrate incrementally so the root
    framework-free `render-*.ts` modules driven by the reducer's effects. DOM refs
    consolidate in `mount.ts`.
 6. **Harden** — remove `@ts-nocheck`, turn on `strict`, delete dead code, add
-   source maps to dev build, final Vitest + Playwright pass, update README
-   (build steps, "load unpacked from repo root", regenerated "Files" section).
+   source maps to dev build, final Vitest + Playwright pass, add the **`/import`**
+   command if not already shipped, update README (build steps, "load unpacked
+   from `dist/`", regenerated "Files" section).
 
 The harness from Phase 0 runs at the end of **every** phase.
 
 ## 9. Risks & mitigations
 - **Behavior drift during split** → migrate verbatim first (Phase 1), split
   behind a green build, run Vitest + the Playwright baseline each phase.
-- **Losing extension identity / storage on cutover** [review — blocking] → build
-  into the **repo root** (not `dist/`) so the load path is unchanged; verify
-  favorites/shortcuts/contexts survive the first build in Phase 1.
+- **Extension identity / storage resets on cutover** [user decision] → building
+  into `dist/` changes the id on first load, which resets `chrome.storage` for
+  the new id. Mitigated by **`/export` → `/import`** settings migration (§3);
+  contexts are ephemeral and not migrated.
 - **Missed early commands** [review] → register all content + worker listeners
   **synchronously at module evaluation, before any `await`**; no top-level await.
 - **Async races landing on a reopened bar** [review] → generation IDs on every
@@ -395,24 +398,19 @@ The harness from Phase 0 runs at the end of **every** phase.
   unmounted on close** (current behavior); test repeated open/close and extension
   reload, and detect/clean a stale host by ID.
 
-## 10. Resolved decisions (were open questions)
+## 10. Resolved decisions
 1. **Framework:** framework-free (Option A) now; Preact re-evaluated later as a
-   separate, interaction-test-guarded change. [resolved per review]
-2. **Build output location:** emit `content.js`/`background.js` at the **repo
-   root** and **commit them**, so the unpacked install keeps working with no lost
-   storage; `src/` is the source of truth. [resolved per review]
+   separate, interaction-test-guarded change.
+2. **Build output location:** emit into a new **`dist/`** directory (git-ignored);
+   `src/` is the source of truth. Accepts a one-time extension-id change on first
+   load; settings migrate via **`/export` → `/import`**. [user decision]
 3. **Worker format:** bundled **classic IIFE**; no `"type":"module"` in the
-   manifest. [resolved per review]
+   manifest.
 4. **TypeScript strictness:** `@ts-nocheck` through the verbatim/split phases,
    turn on full `strict` in Phase 6.
-5. **Output filenames:** keep `content.js` / `background.js` — no manifest churn.
-6. **Unit tests:** **yes** — a Vitest layer for pure modules (`shared/url`,
-   `search/results`, `contexts` expiry, domain scoring) lands in Phase 0 and
-   grows with the split, alongside the Playwright e2e harness. [resolved per
-   review]
-
-### Remaining judgement calls for the human before we start
-- Confirm **framework-free** (vs still wanting Preact despite the risk).
-- Confirm committing built root artifacts is acceptable for this repo.
-- Confirm scope includes adding **Vitest + a committed Playwright harness**
-  (Phase 0) as part of this refactor.
+5. **Output filenames:** keep `content.js` / `background.js` inside `dist/`.
+6. **Tests:** committed Playwright e2e harness (Phase 0, **done**) plus a Vitest
+   layer for pure modules added as they're extracted. [user decision]
+7. **`/export` now, `/import` later:** `/export` ships this checkpoint (clipboard
+   JSON, favorites + shortcuts); `/import` lands before/with the `dist/` cutover
+   (Phase 1) so settings carry across the id change. [user decision]

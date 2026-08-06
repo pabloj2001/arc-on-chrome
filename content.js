@@ -130,6 +130,46 @@
     );
   }
 
+  // ---- Settings export -------------------------------------------------------
+
+  const EXPORT_VERSION = 1;
+
+  // Serializes the durable user settings (favorites + keyword shortcuts) into a
+  // versioned JSON blob. Contexts are intentionally excluded — they're ephemeral
+  // and tied to live tab-group ids. A future /import reads this same shape.
+  function buildSettingsExport() {
+    return JSON.stringify(
+      {
+        type: "arc-search-settings",
+        version: EXPORT_VERSION,
+        exportedAt: new Date().toISOString(),
+        favorites,
+        shortcuts,
+      },
+      null,
+      2
+    );
+  }
+
+  // Fallback when the clipboard API is unavailable/denied: download the JSON.
+  function downloadSettings(json) {
+    try {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "arc-search-settings.json";
+      a.style.display = "none";
+      document.documentElement.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ---- URL helpers -----------------------------------------------------------
 
   const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -266,6 +306,13 @@
         ctx.status(`Removed shortcut "${alias}"`);
       },
     },
+    export: {
+      description: "Copy all settings (favorites + shortcuts) to the clipboard as JSON.",
+      params: [],
+      run: (args, ctx) => {
+        ctx.exportSettings();
+      },
+    },
     context: {
       description:
         "Group tabs into an expiring context. No name resets to default.",
@@ -326,6 +373,26 @@
       removeShortcut: (alias) => {
         delete shortcuts[alias];
         saveShortcuts();
+      },
+      exportSettings: () => {
+        const json = buildSettingsExport();
+        const shortcutCount = Object.keys(shortcuts).length;
+        const favCount = favorites.filter(Boolean).length;
+        const ok = () =>
+          status(
+            `Copied ${favCount} favorite${favCount === 1 ? "" : "s"} + ${shortcutCount} shortcut${shortcutCount === 1 ? "" : "s"} to clipboard`
+          );
+        const fallback = () =>
+          status(
+            downloadSettings(json)
+              ? "Clipboard unavailable — downloaded settings JSON instead"
+              : "Couldn't export settings"
+          );
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(json).then(ok, fallback);
+        } else {
+          fallback();
+        }
       },
       setContext: (name, expiry) => {
         chrome.runtime.sendMessage(
@@ -1024,6 +1091,7 @@
     results.forEach((r, i) => {
       const row = document.createElement("div");
       row.className = "result" + (i === activeIndex ? " active" : "");
+      row.dataset.type = r.type;
 
       if (r.type === "command") {
         const ic = document.createElement("div");

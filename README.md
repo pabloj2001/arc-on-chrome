@@ -111,10 +111,18 @@ required parameters are empty they flash red instead.
 | `/unshortcut <alias>` | Remove a keyword shortcut |
 | `/context [name] [expiry]` | Start an expiring tab-group context (no name resets to default) |
 | `/deletecontext <name>` | Close a context's tab group and stop tracking it |
+| `/export` | Copy all settings (favorites + shortcuts) to the clipboard as JSON |
 
 Favorites and shortcuts are stored with `chrome.storage.local`, so they persist across browser
 restarts and stay in sync across tabs. The favicon buttons under the bar reflect your saved
 favorites; empty slots show their number and can be clicked to start a `/favorite` command.
+
+### Backing up settings
+
+Run **`/export`** to copy all your settings (favorites + keyword shortcuts) to the clipboard as
+versioned JSON (if the clipboard is unavailable it downloads a `arc-search-settings.json` file
+instead). Contexts are ephemeral and not included. This is handy for moving settings between
+installs — a matching `/import` is planned.
 
 ### Adding new commands
 
@@ -128,7 +136,7 @@ const COMMANDS = {
     params: [{ name: "arg" }, { name: "other" }], // each shown as a pill
     run: (args, ctx) => {
       // args: the param values in order
-      // ctx: { status, setFavorite, setShortcut, removeShortcut, close, clearInput }
+      // ctx: { status, setFavorite, setShortcut, removeShortcut, exportSettings, close, clearInput }
       ctx.status("done");
     },
   },
@@ -158,6 +166,23 @@ recommended.
 > **Note on Cmd+1–8:** these are reserved for switching browser tabs. They work for
 > favorites while the bar is open in most setups, but if your browser intercepts them,
 > just click the favicon buttons instead.
+
+## Tests
+
+An end-to-end suite (Playwright) exercises the bar's behavior against the real extension:
+
+```
+npm install
+npx playwright install chromium   # one-time
+npm test                          # runs headless (no windows)
+HEADED=1 npm test                 # watch it drive a visible browser
+```
+
+The tests load the unpacked extension into Chromium's new headless mode (which supports
+extensions), serve their own pages from a local HTTP server (no internet dependency), and cover
+search/URL modes, favorites, keyword shortcuts, the results list + inline autocomplete, the
+command palette + param pills, contexts, keyboard/focus behavior, and `/export`. They live in
+`tests/e2e/`.
 
 ## Files
 

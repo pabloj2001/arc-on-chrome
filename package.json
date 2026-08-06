@@ -1,0 +1,13 @@
+{
+  "name": "arc-search-extension",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Arc-style floating command/search bar Chrome/Edge extension.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}
