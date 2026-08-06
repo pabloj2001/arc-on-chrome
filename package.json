@@ -4,10 +4,18 @@
   "private": true,
   "description": "Arc-style floating command/search bar Chrome/Edge extension.",
   "scripts": {
+    "dev": "node build.mjs --dev --watch",
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "pretest": "node build.mjs",
     "test": "playwright test",
     "test:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.47.0"
+    "@playwright/test": "^1.47.0",
+    "@types/chrome": "^0.2.5",
+    "esbuild": "^0.28.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }

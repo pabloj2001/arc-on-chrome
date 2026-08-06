@@ -343,13 +343,18 @@ incrementally so `dist/` is always loadable.
    watch). A Vitest layer for pure modules is added as those modules are
    extracted (Phase 2+). Still **manual** in Chrome/Edge: OS-level command
    shortcuts and Fluent tab-group colors.
-1. **Scaffold build (verbatim move).** Add `tsconfig.json`, `build.mjs`, devDeps
-   (esbuild, typescript, vitest). Create `src/content/index.ts` +
-   `src/background/index.ts` containing the *current* code moved verbatim (as
-   `.ts` with `// @ts-nocheck`). Register all listeners synchronously at module
-   top (before any `await`). [review] Build to **`dist/`**; copy `manifest.json`.
-   **Load `dist/` unpacked, `/import` the settings exported from the old build,**
-   and confirm the Playwright harness passes against `dist/`.
+1. **Scaffold build (verbatim move). — ✅ DONE.** Added `tsconfig.json`,
+   `build.mjs` (esbuild, two entry points → `dist/`, CSS `text` loader, dev/prod
+   modes, classic IIFE worker), devDeps (esbuild, typescript, vitest,
+   @types/chrome) and npm scripts `dev`/`build`/`typecheck` (+ `pretest` builds
+   before Playwright). Created `src/content/index.ts` + `src/background/index.ts`
+   with the *current* code moved verbatim (`// @ts-nocheck`); listeners stay
+   registered synchronously at module top. Build emits `dist/{content,background}.js`
+   and copies `manifest.json`. The Playwright fixture now loads the extension from
+   `dist/` and the harness passes (**50 tests** — added `/import` coverage). The
+   IIFE wrapper hid the worker's top-level `setContext`, so it is re-exposed on
+   `self` for the harness. Shipped the **`/import`** command (clipboard →
+   file-picker → pasted-arg) so settings survive the extension-id change.
 2. **Extract `shared/`** — pull `url`, `colors`, `constants` (incl. storage keys),
    `messages` out of both files; de-duplicate. Add Vitest for the pure helpers.
 3. **Split `background/`** into the module tree (§5), `contexts.ts` cohesive.

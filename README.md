@@ -112,6 +112,7 @@ required parameters are empty they flash red instead.
 | `/context [name] [expiry]` | Start an expiring tab-group context (no name resets to default) |
 | `/deletecontext <name>` | Close a context's tab group and stop tracking it |
 | `/export` | Copy all settings (favorites + shortcuts) to the clipboard as JSON |
+| `/import [json]` | Restore settings from the clipboard (or a file) exported via `/export` |
 
 Favorites and shortcuts are stored with `chrome.storage.local`, so they persist across browser
 restarts and stay in sync across tabs. The favicon buttons under the bar reflect your saved
@@ -121,8 +122,10 @@ favorites; empty slots show their number and can be clicked to start a `/favorit
 
 Run **`/export`** to copy all your settings (favorites + keyword shortcuts) to the clipboard as
 versioned JSON (if the clipboard is unavailable it downloads a `arc-search-settings.json` file
-instead). Contexts are ephemeral and not included. This is handy for moving settings between
-installs — a matching `/import` is planned.
+instead). Contexts are ephemeral and not included. Run **`/import`** to restore them — it reads
+the JSON from the clipboard, or falls back to a file picker (you can also paste the JSON directly
+after the command). This is the migration path across installs, including the upcoming built
+(`dist/`) version, which loads under a fresh extension id.
 
 ### Adding new commands
 
