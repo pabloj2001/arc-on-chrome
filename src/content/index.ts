@@ -24,6 +24,7 @@ import { renderFavorites as renderFavoritesView } from "./ui/render-favorites";
 import { renderResults as renderResultsView } from "./ui/render-results";
 import { renderContext as renderContextView } from "./ui/render-context";
 import { renderContextsRow as renderContextsRowView } from "./ui/render-contexts-row";
+import { renderCommandChips as renderCommandChipsView } from "./ui/render-command-chips";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -523,61 +524,17 @@ import { renderContextsRow as renderContextsRowView } from "./ui/render-contexts
   // upcoming ones show as faded placeholders. The input is moved into the active
   // slot and restored to the bar when command mode ends.
   function renderCommandChips() {
-    if (!cmdChipsEl) return;
-    // Detach the input before clearing so we don't destroy it, then re-place it.
-    if (inputWrap) inputWrap.appendChild(input);
-    cmdChipsEl.textContent = "";
-
-    if (!commandState) {
-      cmdChipsEl.style.display = "none";
-      input.classList.remove("param-active");
-      input.style.width = "";
-      renderPill();
-      return;
-    }
-    cmdChipsEl.style.display = "inline-flex";
-
-    const cp = document.createElement("span");
-    cp.className = "cmd-pill";
-    cp.textContent = "/" + commandState.name;
-    cmdChipsEl.appendChild(cp);
-
-    for (let i = 0; i < commandState.params.length; i++) {
-      const invalid = commandState.invalid && commandState.invalid.has(i);
-      if (i === commandState.index) {
-        const wrap = document.createElement("span");
-        wrap.className = "param-pill active" + (invalid ? " invalid" : "");
-        const lab = document.createElement("span");
-        lab.className = "plabel";
-        lab.textContent = commandState.params[i].name;
-        wrap.appendChild(lab);
-        input.placeholder = "";
-        input.classList.add("param-active");
-        wrap.appendChild(input);
-        cmdChipsEl.appendChild(wrap);
-        updateParamInputWidth();
-      } else {
-        const value = commandState.values[i];
-        const hasVal = value != null && value !== "";
-        const pp = document.createElement("span");
-        pp.className =
-          "param-pill" + (hasVal ? " filled" : " upcoming") + (invalid ? " invalid" : "");
-        const lab = document.createElement("span");
-        lab.className = "plabel";
-        lab.textContent = commandState.params[i].name;
-        pp.appendChild(lab);
-        if (hasVal) {
-          const val = document.createElement("span");
-          val.className = "pval";
-          val.textContent = value;
-          pp.appendChild(val);
-        }
-        pp.addEventListener("click", () => jumpToParam(i));
-        cmdChipsEl.appendChild(pp);
-      }
-    }
-    if (ghostEl) renderGhost(); // hide any stale ghost while in command mode
-    input.focus();
+    renderCommandChipsView({
+      cmdChips: cmdChipsEl,
+      inputWrap,
+      input,
+      ghost: ghostEl,
+      commandState,
+      onRenderPill: renderPill,
+      onUpdateWidth: updateParamInputWidth,
+      onJumpToParam: (i) => jumpToParam(i),
+      onRenderGhost: renderGhost,
+    });
   }
 
   // Move to a specific param (e.g. clicking a pill), keeping the current value.
