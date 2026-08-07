@@ -3,7 +3,7 @@ import {
   STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS, MAX_CONTEXTS,
 } from "../shared/constants";
 import {
-  normalizeUrl, buildUrl, applyShortcut, faviconUrl, canon, hostPath,
+  normalizeUrl, buildUrl, applyShortcut, canon, hostPath,
   looksLikeNavigable,
 } from "../shared/url";
 import { groupHex, groupTextColor, tintBg } from "../shared/colors";
@@ -22,6 +22,7 @@ import { mountBar } from "./ui/mount";
 import { renderPill as renderPillView } from "./ui/render-pill";
 import { renderGhost as renderGhostView } from "./ui/render-ghost";
 import { renderFavorites as renderFavoritesView } from "./ui/render-favorites";
+import { renderResults as renderResultsView } from "./ui/render-results";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -846,79 +847,12 @@ import { renderFavorites as renderFavoritesView } from "./ui/render-favorites";
   }
 
   function renderResults() {
-    if (!resultsEl) return;
-    resultsEl.textContent = "";
-    if (!results.length) {
-      resultsEl.style.display = "none";
-      return;
-    }
-    resultsEl.style.display = "block";
-    results.forEach((r, i) => {
-      const row = document.createElement("div");
-      row.className = "result" + (i === activeIndex ? " active" : "");
-      row.dataset.type = r.type;
-
-      if (r.type === "command") {
-        const ic = document.createElement("div");
-        ic.className = "result-ic";
-        ic.textContent = "/";
-        row.appendChild(ic);
-      } else if (r.type === "search") {
-        const ic = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        ic.setAttribute("class", "result-ic-svg");
-        ic.setAttribute("viewBox", "0 0 24 24");
-        ic.setAttribute("fill", "none");
-        ic.setAttribute("stroke", "currentColor");
-        ic.setAttribute("stroke-width", "2");
-        ic.setAttribute("stroke-linecap", "round");
-        ic.innerHTML =
-          '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
-        row.appendChild(ic);
-      } else {
-        const img = document.createElement("img");
-        img.src = faviconUrl(r.url);
-        img.alt = "";
-        img.addEventListener("error", () => {
-          img.style.visibility = "hidden";
-        });
-        row.appendChild(img);
-      }
-
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      const title = document.createElement("div");
-      title.className = "title";
-      title.textContent =
-        r.type === "command" || r.type === "search" ? r.title : r.title || r.url;
-      const url = document.createElement("div");
-      url.className = "url";
-      url.textContent =
-        r.type === "command"
-          ? r.subtitle
-          : r.type === "search"
-          ? r.engineLabel || "Google Search"
-          : r.url;
-      meta.appendChild(title);
-      meta.appendChild(url);
-
-      const tag = document.createElement("div");
-      tag.className = "tag";
-      tag.textContent =
-        r.type === "tab"
-          ? "Open tab"
-          : r.type === "command"
-          ? "Command"
-          : r.type === "domain"
-          ? "Website"
-          : r.type === "search"
-          ? "Search"
-          : "History";
-
-      row.appendChild(meta);
-      row.appendChild(tag);
-      row.addEventListener("click", () => chooseResult(i));
-      row.addEventListener("mousemove", () => setActive(i, false));
-      resultsEl.appendChild(row);
+    renderResultsView({
+      el: resultsEl,
+      items: results,
+      activeIndex,
+      onChoose: (i) => chooseResult(i),
+      onHover: (i) => setActive(i, false),
     });
   }
 
