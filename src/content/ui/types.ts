@@ -11,6 +11,7 @@ export interface ResultRow {
   url?: string;
   subtitle?: string;
   engineLabel?: string;
+  term?: string; // search rows: the raw typed term (kept in the bar on preview)
   tabId?: number;
   windowId?: number;
   name?: string; // command name (type === "command")

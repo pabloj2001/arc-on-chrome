@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS, MAX_CONTEXTS,
 } from "../shared/constants";
@@ -25,6 +24,15 @@ import { renderResults as renderResultsView } from "./ui/render-results";
 import { renderContext as renderContextView } from "./ui/render-context";
 import { renderContextsRow as renderContextsRowView } from "./ui/render-contexts-row";
 import { renderCommandChips as renderCommandChipsView } from "./ui/render-command-chips";
+import type { Favorite, Shortcuts, TabItem, HistoryItem } from "../shared/types";
+import type { CommandCtx } from "./commands/types";
+import type { ResultRow, CommandState, ContextInfo } from "./ui/types";
+
+declare global {
+  interface Window {
+    __arcSearchInjected?: boolean;
+  }
+}
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -35,40 +43,40 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // ICON_SEARCH / ICON_BACK now live in ./ui/icons; STYLES is ./ui/bar.css.
 
-  let host = null;
-  let overlay = null;
-  let stack = null;
-  let input = null;
-  let barEl = null;
-  let iconEl = null;
-  let inputWrap = null;
-  let ghostEl = null;
-  let pillEl = null;
-  let cmdChipsEl = null;
-  let favRow = null;
-  let contextsRowEl = null;
-  let resultsEl = null;
-  let statusEl = null;
+  let host: HTMLDivElement | null = null;
+  let overlay: HTMLDivElement | null = null;
+  let stack: HTMLDivElement | null = null;
+  let input: HTMLInputElement | null = null;
+  let barEl: HTMLDivElement | null = null;
+  let iconEl: SVGElement | null = null;
+  let inputWrap: HTMLDivElement | null = null;
+  let ghostEl: HTMLDivElement | null = null;
+  let pillEl: HTMLSpanElement | null = null;
+  let cmdChipsEl: HTMLSpanElement | null = null;
+  let favRow: HTMLDivElement | null = null;
+  let contextsRowEl: HTMLDivElement | null = null;
+  let resultsEl: HTMLDivElement | null = null;
+  let statusEl: HTMLDivElement | null = null;
   let isOpen = false;
   let opensInCurrentTab = false; // cmd+L: submit replaces the current tab
   let defaultUrl = ""; // text the bar is prefilled with on open (cmd+L)
-  let favorites = new Array(FAV_COUNT).fill(null);
-  let shortcuts = {}; // alias -> url template (with %s)
-  let activeShortcut = null; // alias currently shown as a pill
-  let dismissedToken = null; // the typed token the user backspaced out of, to avoid re-arming
-  let shortcutTypedToken = null; // what the user actually typed before the pill armed (e.g. "data")
-  let openTabs = []; // index of open tabs {tabId, windowId, title, url}
-  let historyItems = []; // 7-day history {title, url, lastVisitTime}
-  let currentTabId = null; // the tab hosting this bar (excluded from results)
-  let results = []; // current visible result rows
+  let favorites: Favorite[] = new Array(FAV_COUNT).fill(null);
+  let shortcuts: Shortcuts = {}; // alias -> url template (with %s)
+  let activeShortcut: string | null = null; // alias currently shown as a pill
+  let dismissedToken: string | null = null; // the typed token the user backspaced out of, to avoid re-arming
+  let shortcutTypedToken: string | null = null; // what the user actually typed before the pill armed (e.g. "data")
+  let openTabs: TabItem[] = []; // index of open tabs {tabId, windowId, title, url}
+  let historyItems: HistoryItem[] = []; // 7-day history {title, url, lastVisitTime}
+  let currentTabId: number | null = null; // the tab hosting this bar (excluded from results)
+  let results: ResultRow[] = []; // current visible result rows
   let activeIndex = -1; // highlighted result, -1 = none (typing/search)
-  let commandState = null; // active command param entry, or null
-  let domainScores = new Map(); // host -> score, for inline autocomplete
+  let commandState: CommandState | null = null; // active command param entry, or null
+  let domainScores: Map<string, number> = new Map(); // host -> score, for inline autocomplete
   let ghostSuffix = ""; // current inline-autocomplete completion (after the caret)
   let typedQuery = ""; // the user's actual typed text (preserved while navigating)
   let navigating = false; // true while previewing a highlighted suggestion's URL
-  let activeContext = null; // { groupId, name, color } or null
-  let contextsList = []; // all tracked contexts [{ groupId, name, color }]
+  let activeContext: ContextInfo | null = null; // { groupId, name, color } or null
+  let contextsList: ContextInfo[] = []; // all tracked contexts [{ groupId, name, color }]
   let currentTabGroupId = -1; // group id of the tab the bar was opened over (-1 = none)
   let contextTemporarilyExited = false; // one-shot "use the default space" for this bar open
 
@@ -80,7 +88,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
       favorites = normalizeFavArray(res[STORAGE_KEY]);
     }
     if (res && res[SHORTCUTS_KEY] && typeof res[SHORTCUTS_KEY] === "object") {
-      shortcuts = res[SHORTCUTS_KEY];
+      shortcuts = res[SHORTCUTS_KEY] as Shortcuts;
     }
     if (isOpen) renderFavorites();
   });
@@ -93,19 +101,19 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
       if (isOpen) renderFavorites();
     }
     if (changes[SHORTCUTS_KEY]) {
-      shortcuts = changes[SHORTCUTS_KEY].newValue || {};
+      shortcuts = (changes[SHORTCUTS_KEY].newValue || {}) as Shortcuts;
     }
   });
 
   function saveFavorites() {
-    return new Promise((resolve) =>
-      chrome.storage.local.set({ [STORAGE_KEY]: favorites }, resolve)
+    return new Promise<void>((resolve) =>
+      chrome.storage.local.set({ [STORAGE_KEY]: favorites }, () => resolve())
     );
   }
 
   function saveShortcuts() {
-    return new Promise((resolve) =>
-      chrome.storage.local.set({ [SHORTCUTS_KEY]: shortcuts }, resolve)
+    return new Promise<void>((resolve) =>
+      chrome.storage.local.set({ [SHORTCUTS_KEY]: shortcuts }, () => resolve())
     );
   }
 
@@ -114,7 +122,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   // clipboard/file plumbing (downloadSettings, pickSettingsFile) stays here.
 
   // Fallback when the clipboard API is unavailable/denied: download the JSON.
-  function downloadSettings(json) {
+  function downloadSettings(json: string): boolean {
     try {
       const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -137,7 +145,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // Fallback when the clipboard can't be read: prompt for a JSON file and hand
   // its text to `cb`.
-  function pickSettingsFile(cb) {
+  function pickSettingsFile(cb: (text: string | null) => void): boolean {
     try {
       const input = document.createElement("input");
       input.type = "file";
@@ -172,20 +180,20 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   function commandCtx() {
     return {
       status,
-      setFavorite: (i, url) => {
+      setFavorite: (i: number, url: Favorite) => {
         favorites[i] = url;
         saveFavorites();
         renderFavorites();
       },
-      setShortcut: (alias, url) => {
+      setShortcut: (alias: string, url: string) => {
         shortcuts[alias] = url;
         saveShortcuts();
       },
-      removeShortcut: (alias) => {
+      removeShortcut: (alias: string) => {
         delete shortcuts[alias];
         saveShortcuts();
       },
-      hasShortcut: (alias) => !!shortcuts[alias],
+      hasShortcut: (alias: string) => !!shortcuts[alias],
       exportSettings: () => {
         const json = buildSettingsExport(favorites, shortcuts);
         const shortcutCount = Object.keys(shortcuts).length;
@@ -206,8 +214,8 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
           fallback();
         }
       },
-      importSettings: (pasted) => {
-        const apply = (text) => {
+      importSettings: (pasted: string | null) => {
+        const apply = (text: string | null) => {
           if (text == null) return status("Import cancelled");
           const parsed = parseSettingsImport(text);
           if (!parsed) return status("Couldn't read settings — invalid JSON");
@@ -241,7 +249,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
           viaFile();
         }
       },
-      setContext: (name, expiry) => {
+      setContext: (name: string, expiry: string) => {
         chrome.runtime.sendMessage(
           { type: MSG.SET_CONTEXT, name, expiry },
           (res) => {
@@ -272,7 +280,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
         contextTemporarilyExited = false;
         renderContext();
       },
-      deleteContext: (name) => {
+      deleteContext: (name: string) => {
         chrome.runtime.sendMessage(
           { type: MSG.DELETE_CONTEXT, name },
           (res) => {
@@ -293,7 +301,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     };
   }
 
-  function runCommand(text) {
+  function runCommand(text: string) {
     const parts = text.slice(1).split(/\s+/).filter(Boolean);
     const name = (parts.shift() || "").toLowerCase();
     const cmd = COMMANDS[name];
@@ -306,7 +314,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   // commandState = { name, params, values, index, enteredFrom, invalid } while
   // filling in a command's params, or null. `enteredFrom` is the text to restore
   // if the user backspaces out.
-  function enterCommandMode(name, firstValue, enteredFrom) {
+  function enterCommandMode(name: string, firstValue?: string, enteredFrom?: string) {
     const cmd = COMMANDS[name];
     if (!cmd) return;
     if (!cmd.params || !cmd.params.length) {
@@ -334,7 +342,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // Leaves command mode, putting `text` in the input. Refocuses so the deferred
   // blur-close doesn't fire.
-  function exitCommandMode(text) {
+  function exitCommandMode(text: string) {
     commandState = null;
     renderCommandChips();
     input.value = text || "";
@@ -374,7 +382,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   }
 
   // Briefly outline the empty params in red without running the command.
-  function flashInvalidParams(indices) {
+  function flashInvalidParams(indices: number[]) {
     if (!commandState) return;
     commandState.invalid = new Set(indices);
     renderCommandChips();
@@ -389,7 +397,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   function runCommandStructured() {
     if (!commandState) return;
     commandState.values[commandState.index] = input.value;
-    const missing = [];
+    const missing: number[] = [];
     commandState.params.forEach((p, i) => {
       const v = commandState.values[i];
       if (!p.optional && (!v || !v.trim())) missing.push(i);
@@ -477,7 +485,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // Switching just changes the active context (where new bar-opened tabs go);
   // the bar stays open and its pill/border update.
-  function switchContextByGroupId(groupId) {
+  function switchContextByGroupId(groupId: number) {
     chrome.runtime.sendMessage(
       { type: MSG.SWITCH_CONTEXT, groupId },
       (res) => {
@@ -501,7 +509,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   }
 
   // `digit` is the Ctrl+N number: 1 = default space, 2 = first context, etc.
-  function switchContextByIndex(digit) {
+  function switchContextByIndex(digit: number) {
     if (digit === 1) return switchContextToDefault();
     const ctx = contextsList[digit - 2];
     if (ctx) switchContextByGroupId(ctx.groupId);
@@ -538,7 +546,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   }
 
   // Move to a specific param (e.g. clicking a pill), keeping the current value.
-  function jumpToParam(i) {
+  function jumpToParam(i: number) {
     if (!commandState) return;
     commandState.values[commandState.index] = input.value;
     commandState.index = i;
@@ -567,7 +575,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   // Turn "<alias> <rest>" into a pill + query field. `typedToken` is what the
   // user actually typed (may be a prefix that autocompleted), so backspacing the
   // pill can restore exactly that.
-  function activateShortcut(alias, rest, typedToken) {
+  function activateShortcut(alias: string, rest: string, typedToken: string) {
     activeShortcut = alias;
     shortcutTypedToken = typedToken || alias;
     dismissedToken = null;
@@ -580,7 +588,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // The best alias a prefix could autocomplete to: shortest match wins, then
   // alphabetical. Excludes an exact match (handled separately).
-  function bestAliasByPrefix(token) {
+  function bestAliasByPrefix(token: string): string | null {
     const t = token.toLowerCase();
     const cands = Object.keys(shortcuts).filter(
       (a) => a !== t && a.startsWith(t)
@@ -592,7 +600,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // Which alias pressing space on this first token should arm: an exact alias,
   // or (once 3+ chars are typed) the most likely prefix completion.
-  function aliasForSpace(token) {
+  function aliasForSpace(token: string): string | null {
     if (!token) return null;
     if (shortcuts[token]) return token;
     if (token.length >= 3) return bestAliasByPrefix(token);
@@ -625,7 +633,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   // No shortcut: empty query -> other open tabs; typing -> title/url matches in
   // open tabs then history. With a shortcut pill active: restrict to tabs/history
   // under the shortcut's destination URL (and further narrow by the typed query).
-  function computeResults() {
+  function computeResults(): ResultRow[] {
     if (commandState) return [];
     const raw = input ? input.value : "";
 
@@ -654,8 +662,8 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
       if (!base) return [];
     }
     const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const out = [];
-    const seen = new Set();
+    const out: ResultRow[] = [];
+    const seen = new Set<string>();
 
     // Top result: a website to visit. Prefer a visited domain we can autocomplete
     // to (so "linkedin.c" suggests the known "linkedin.com", matching the ghost);
@@ -710,7 +718,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     // mode the search runs the shortcut query instead of a plain web search.
     const term = raw.trim();
     if (term && out.length) {
-      const searchResult = base
+      const searchResult: ResultRow = base
         ? {
             type: "search",
             term,
@@ -732,7 +740,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     return out;
   }
 
-  function refreshResults(autoHighlightFirst) {
+  function refreshResults(autoHighlightFirst?: boolean) {
     results = computeResults();
     if (activeIndex >= results.length) activeIndex = results.length - 1;
     // While typing a query, highlight the first suggestion by default so Enter
@@ -753,7 +761,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     });
   }
 
-  function setActive(i, scroll) {
+  function setActive(i: number, scroll: boolean) {
     activeIndex = i;
     if (!resultsEl) return;
     const rows = resultsEl.children;
@@ -765,7 +773,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     }
   }
 
-  function moveSelection(dir) {
+  function moveSelection(dir: number) {
     if (!results.length) return;
     let next = activeIndex + dir;
     if (next < -1) next = -1;
@@ -800,7 +808,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     }
   }
 
-  function chooseResult(i) {
+  function chooseResult(i: number) {
     const r = results[i];
     if (!r) return;
     if (r.type === "command") {
@@ -878,14 +886,14 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   }
 
   // Wraps the pure ranking with the command/shortcut-mode suppression guard.
-  function bestDomainMatch(value) {
+  function bestDomainMatch(value: string): string | null {
     if (commandState || activeShortcut) return null;
     return pickDomainMatch(value, domainScores);
   }
 
   // The completion suffix shown as ghost text: completes a command name when
   // typing "/…", otherwise a visited base domain (e.g. "gith" -> "ub.com"), or "".
-  function computeCompletion(value) {
+  function computeCompletion(value: string): string {
     if (!value || commandState || activeShortcut) return "";
     // Command-name ghost: "/fav" -> "orite".
     if (value.startsWith("/") && !/\s/.test(value)) {
@@ -925,7 +933,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
   // ---- Key handling ----------------------------------------------------------
   // isToggleCombo / isUrlCombo now live in ./keyboard/combos.
 
-  function onKeyDown(e) {
+  function onKeyDown(e: KeyboardEvent) {
     if (isToggleCombo(e)) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -1135,7 +1143,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     }
   }
 
-  function onKeyOther(e) {
+  function onKeyOther(e: KeyboardEvent) {
     if (isOpen) e.stopImmediatePropagation();
   }
 
@@ -1154,11 +1162,11 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // ---- UI --------------------------------------------------------------------
 
-  function status(msg) {
+  function status(msg: string) {
     if (statusEl) statusEl.textContent = msg || "";
   }
 
-  function openFavorite(i) {
+  function openFavorite(i: number) {
     const url = favorites[i];
     if (!url) {
       status(`Favorite ${i + 1} is empty. Set it with /favorite ${i + 1} <url>`);
@@ -1190,7 +1198,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // STYLES moved to ./ui/bar.css (imported as text via esbuild).
 
-  function open(opts) {
+  function open(opts?: { opensInCurrentTab?: boolean; defaultUrl?: string }) {
     if (isOpen) return;
     opts = opts || {};
     isOpen = true;
@@ -1335,7 +1343,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
 
   // Sends a resolved URL to the right place: the current tab (cmd+L) or a new
   // tab (cmd+T, added to the active context group when one is set).
-  function dispatch(url) {
+  function dispatch(url: string) {
     const groupId = contextGroupIdForDispatch();
     close();
     if (opensInCurrentTab) {
@@ -1381,7 +1389,7 @@ import { renderCommandChips as renderCommandChipsView } from "./ui/render-comman
     host = overlay = stack = input = barEl = inputWrap = ghostEl = pillEl = cmdChipsEl = favRow = contextsRowEl = resultsEl = statusEl = null;
   }
 
-  function toggle(opts) {
+  function toggle(opts?: { opensInCurrentTab?: boolean; defaultUrl?: string }) {
     opts = opts || {};
     const nextCurrent = !!opts.opensInCurrentTab;
     if (isOpen) {
