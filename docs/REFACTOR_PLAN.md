@@ -391,15 +391,20 @@ incrementally so `dist/` is always loadable.
    (45 unit total). typecheck clean; 50 e2e still green. **Remaining:** extract
    data/index-client, then the reducer + effects with a compatibility renderer
    (the original Phase 4/5 crux).
-5. **Rebuild the `ui/` layer — 🚧 STARTED.** **Done:** ported `STYLES` →
-   `src/content/ui/bar.css` (imported as text via esbuild's css loader; the shadow
-   root still gets exactly one `<style>` with the same CSS, verified inlined in
-   `dist/` + by the keyboard spec), and the SVG icons → `src/content/ui/icons.ts`.
-   `src/types/css.d.ts` declares the `*.css` text import. **Remaining:** turn the
-   render functions (renderResults/renderFavorites/renderPill/renderCommandChips/
-   renderContextsRow/renderGhost) into framework-free `render-*.ts` modules driven
-   by the reducer's effects, with DOM refs consolidated in `mount.ts` — this needs
-   the reducer/effects layer below and is the deferred crux.
+5. **Rebuild the `ui/` layer — ✅ DONE.** DOM construction is consolidated in
+   `src/content/ui/mount.ts` (`mountBar()` builds host + shadow root + the single
+   `<style>` and returns a refs object). `STYLES` → `ui/bar.css` (text import),
+   icons → `ui/icons.ts`. Every render function is now a framework-free view
+   module over an explicit deps object: `render-pill`, `render-ghost`,
+   `render-favorites`, `render-results`, `render-context`, `render-contexts-row`,
+   and `render-command-chips` (which preserves the single-stable-input-node
+   invariant — the input is moved into the active param slot, never recreated).
+   The entry keeps thin wrappers supplying refs/state/callbacks (state still lives
+   in the entry as the store; these render modules are the effects that draw it).
+   `content/index.ts` is down from 2117 → ~1420 lines. typecheck clean; 50 e2e +
+   45 unit green. **Remaining (deferred crux):** formalize the entry's state into
+   a `state/store.ts` reducer + dispatch (the render wrappers already isolate the
+   effect boundary), then Phase 6 hardening.
 6. **Harden** — remove `@ts-nocheck`, turn on `strict`, delete dead code, add
    source maps to dev build, final Vitest + Playwright pass, add the **`/import`**
    command if not already shipped, update README (build steps, "load unpacked
