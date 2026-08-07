@@ -405,12 +405,32 @@ incrementally so `dist/` is always loadable.
    45 unit green. **Remaining (deferred crux):** formalize the entry's state into
    a `state/store.ts` reducer + dispatch (the render wrappers already isolate the
    effect boundary), then Phase 6 hardening.
-6. **Harden** — remove `@ts-nocheck`, turn on `strict`, delete dead code, add
-   source maps to dev build, final Vitest + Playwright pass, add the **`/import`**
-   command if not already shipped, update README (build steps, "load unpacked
-   from `dist/`", regenerated "Files" section).
+6. **Harden — ✅ DONE (with one documented island).** Deleted the dead root
+   `content.js`/`background.js` (source is `src/`, build emits `dist/`). Dev build
+   already ships external source maps (`npm run dev`); prod is minified/mapless.
+   `/import` shipped in Phase 1. README updated (load unpacked from `dist/`,
+   Project-layout section, build scripts, `/export`→`/import`). **Typing:** turned
+   on `noImplicitAny` and removed `@ts-nocheck` from **all 19 leaf modules**, which
+   are now fully typed (new type homes: `shared/types.ts`,
+   `content/commands/types.ts`, `content/ui/types.ts`; `background/contexts.ts`
+   gets `Context`/`ContextInfo`/`ContextState` + `GroupColor`). `typecheck` is
+   clean under `noImplicitAny`; Vitest (45) + Playwright (50) green. **Single
+   remaining `@ts-nocheck` island: `src/content/index.ts`** — the ~1400-line
+   imperative entry (state vars + focus/caret/measure effects). Full `strict` +
+   typing it is the same deferred crux as the reducer (its 299 implicit-any errors
+   are almost all the untyped module-scoped state); left for a focused follow-up
+   so it can be done as one cohesive reducer+types change without risking the
+   behavior the harness guards.
 
 The harness from Phase 0 runs at the end of **every** phase.
+
+### Status summary (as of this checkpoint)
+Phases 0–5 complete; Phase 6 complete except the single `content/index.ts`
+`@ts-nocheck` island (the deferred reducer + full-`strict` typing of the entry).
+The extension is fully modular: `src/shared/*`, `src/background/*` (6 modules),
+`src/content/*` (settings, search, keyboard, commands, ui/{mount,bar.css,icons,
+7×render-*}) → bundled by esbuild into `dist/{content,background}.js`. 45 Vitest +
+50 Playwright tests green; `npm run typecheck` clean under `noImplicitAny`.
 
 ## 9. Risks & mitigations
 - **Behavior drift during split** → migrate verbatim first (Phase 1), split
