@@ -19,6 +19,9 @@ import { isToggleCombo, isUrlCombo } from "./keyboard/combos";
 import { COMMANDS, usageOf, bestCommandByPrefix } from "./commands/registry";
 import { ICON_SEARCH, ICON_BACK } from "./ui/icons";
 import { mountBar } from "./ui/mount";
+import { renderPill as renderPillView } from "./ui/render-pill";
+import { renderGhost as renderGhostView } from "./ui/render-ghost";
+import { renderFavorites as renderFavoritesView } from "./ui/render-favorites";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -565,19 +568,13 @@ import { mountBar } from "./ui/mount";
   // ---- Shortcut pill ---------------------------------------------------------
 
   function renderPill() {
-    if (!pillEl) return;
-    if (activeShortcut) {
-      pillEl.textContent = activeShortcut;
-      pillEl.style.display = "inline-flex";
-      input.placeholder = `Search "${activeShortcut}"…`;
-    } else {
-      pillEl.style.display = "none";
-      if (!commandState) {
-        input.placeholder = opensInCurrentTab
-          ? "Edit URL or search…"
-          : "Search or enter address…";
-      }
-    }
+    renderPillView({
+      pill: pillEl,
+      input,
+      activeShortcut,
+      commandState,
+      opensInCurrentTab,
+    });
   }
 
   // Renders the command pill followed by a pill for EVERY param: completed ones
@@ -1080,21 +1077,7 @@ import { mountBar } from "./ui/mount";
   function renderGhost() {
     if (!ghostEl || !input) return;
     ghostSuffix = navigating ? "" : computeCompletion(input.value);
-    if (!ghostSuffix) {
-      ghostEl.style.display = "none";
-      ghostEl.textContent = "";
-      return;
-    }
-    ghostEl.textContent = "";
-    const typed = document.createElement("span");
-    typed.className = "g-typed";
-    typed.textContent = input.value;
-    const suffix = document.createElement("span");
-    suffix.className = "g-suffix";
-    suffix.textContent = ghostSuffix;
-    ghostEl.appendChild(typed);
-    ghostEl.appendChild(suffix);
-    ghostEl.style.display = "flex";
+    renderGhostView({ ghost: ghostEl, input, suffix: ghostSuffix });
   }
 
   // Accept the ghost completion (Right arrow): fill the text, don't navigate.
@@ -1357,50 +1340,21 @@ import { mountBar } from "./ui/mount";
   }
 
   function renderFavorites() {
-    if (!favRow) return;
-    favRow.textContent = "";
-    for (let i = 0; i < FAV_COUNT; i++) {
-      const url = favorites[i];
-      const btn = document.createElement("button");
-      btn.className = "fave" + (url ? "" : " empty");
-      btn.title = url
-        ? `${i + 1}: ${url}`
-        : `Empty — set with /favorite ${i + 1} <url>`;
-
-      if (url) {
-        const img = document.createElement("img");
-        img.src = faviconUrl(url);
-        img.alt = "";
-        img.addEventListener("error", () => {
-          img.remove();
-          btn.textContent = String(i + 1);
-        });
-        btn.appendChild(img);
-      } else {
-        btn.textContent = String(i + 1);
-      }
-
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = String(i + 1);
-      btn.appendChild(badge);
-
-      btn.addEventListener("click", () => {
-        if (url) {
-          openFavorite(i);
-        } else {
-          // Start the /favorite command with this slot number and the current
-          // tab's URL prefilled.
-          enterCommandMode("favorite", String(i + 1));
-          advanceParam(); // commit the slot number, move to the url param
-          input.value = location.href;
-          updateParamInputWidth();
-          input.focus();
-          input.select();
-        }
-      });
-      favRow.appendChild(btn);
-    }
+    renderFavoritesView({
+      favRow,
+      favorites,
+      onOpen: (i) => openFavorite(i),
+      onEmpty: (i) => {
+        // Start the /favorite command with this slot number and the current
+        // tab's URL prefilled.
+        enterCommandMode("favorite", String(i + 1));
+        advanceParam(); // commit the slot number, move to the url param
+        input.value = location.href;
+        updateParamInputWidth();
+        input.focus();
+        input.select();
+      },
+    });
   }
 
   // STYLES moved to ./ui/bar.css (imported as text via esbuild).
