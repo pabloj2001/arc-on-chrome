@@ -129,7 +129,7 @@ after the command). This is the migration path across installs, including the up
 
 ### Adding new commands
 
-Commands live in a small registry in `content.js`. To add one, add an entry to the
+Commands live in a small registry in `src/content/commands/registry.ts`. To add one, add an entry to the
 `COMMANDS` object:
 
 ```js
@@ -139,7 +139,7 @@ const COMMANDS = {
     params: [{ name: "arg" }, { name: "other" }], // each shown as a pill
     run: (args, ctx) => {
       // args: the param values in order
-      // ctx: { status, setFavorite, setShortcut, removeShortcut, exportSettings, close, clearInput }
+      // ctx: { status, setFavorite, setShortcut, removeShortcut, hasShortcut, exportSettings, importSettings, setContext, clearContext, deleteContext, close, clearInput }
       ctx.status("done");
     },
   },
@@ -148,9 +148,16 @@ const COMMANDS = {
 
 ## Install (load unpacked)
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode** (top-right).
-3. Click **Load unpacked** and select this folder.
+The extension is compiled from `src/` into `dist/` (the folder Chrome loads):
+
+1. `npm install` then `npm run build` (produces `dist/`).
+2. Open `chrome://extensions`.
+3. Enable **Developer mode** (top-right).
+4. Click **Load unpacked** and select the **`dist/`** folder.
+
+> **Upgrading from an older build?** Loading from `dist/` may give the extension a new
+> unpacked id, which resets its stored settings. Run **`/export`** on the old build first,
+> then **`/import`** on the new one to carry your favorites + shortcuts across.
 
 ## Shortcuts
 
@@ -191,8 +198,26 @@ the results list + inline autocomplete, the command palette + param pills, conte
 keyboard/focus behavior, and `/export` + `/import`. Unit tests live in `tests/unit/`, e2e in
 `tests/e2e/`.
 
-## Files
+## Project layout
 
-- `manifest.json` — MV3 manifest, permissions (`commands`, `tabs`, `storage`, `favicon`, `history`, `tabGroups`, `alarms`), and command bindings.
-- `background.js` — routes the shortcuts to the page, opens results in new tabs, switches to an existing tab when opening a favorite, serves the open-tabs + 7-day history index, and manages contexts (tab groups): creation, grouping new tabs, and the expiry/title-refresh alarm.
-- `content.js` — renders the bar (isolated Shadow DOM), handles input, modes, favorites, keyword shortcuts, the tabs/history result list, inline autocomplete, the search suggestion, the command palette/param pills, and the contexts row + coloring.
+The extension is written as modular TypeScript in `src/` and bundled by esbuild
+(`build.mjs`) into two files in `dist/` — `content.js` (IIFE, CSS inlined) and
+`background.js` (classic service worker) — alongside a copied `manifest.json`.
+
+```
+src/
+  shared/        # imported by BOTH bundles: url, colors, constants, messages
+  background/    # service worker: index (listeners), commands, router,
+                 #   index-builder, favorites, contexts (lifecycle + alarms)
+  content/       # the bar
+    index.ts     #   entry: state + input/keyboard/dispatch + render wrappers
+    settings.ts  #   export/import (de)serialization
+    search/      #   matching + ranking helpers
+    keyboard/    #   key-combo predicates
+    commands/    #   the slash-command registry
+    ui/          #   mount.ts (DOM refs), bar.css, icons, render-*.ts view modules
+```
+
+Build/dev scripts: `npm run build` (minified prod), `npm run dev` (esbuild watch,
+source maps), `npm run typecheck` (tsc), `npm run test:unit` (Vitest), `npm test`
+(Playwright, builds first). `dist/` is git-ignored; `src/` is the source of truth.
