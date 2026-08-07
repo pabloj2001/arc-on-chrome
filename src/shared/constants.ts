@@ -23,7 +23,7 @@ export const DEFAULT_DURATION_MS = 24 * 60 * 60 * 1000;
 // Color names to cycle contexts through. Limited to colors whose Edge hex we
 // map confidently (Edge's Fluent palette has no true red/green), so the bar's
 // pill color always matches the tab-strip chip.
-export const GROUP_COLORS = [
+export const GROUP_COLORS: Array<`${chrome.tabGroups.Color}`> = [
   "blue", "purple", "pink", "cyan", "orange", "yellow", "grey",
 ];
 

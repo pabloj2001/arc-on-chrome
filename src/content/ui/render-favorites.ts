@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Renders the favicon buttons row. Each filled slot opens its favorite; each
 // empty slot shows its number and starts a /favorite command (via onEmpty).
 import { FAV_COUNT } from "../../shared/constants";

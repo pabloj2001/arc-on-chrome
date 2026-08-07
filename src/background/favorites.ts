@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Favorite/URL opening: focus a tab that already shows the target, else open it
 // (joining the active context group when one is given).
 import { parseUrl, tabMatchesFavorite } from "../shared/url";

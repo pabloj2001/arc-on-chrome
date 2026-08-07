@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Pure key-combo predicates for the bar's global shortcuts.
 
 // Cmd/Ctrl+T (no Alt/Shift) — toggle the search bar.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Renders the command pill + a pill for every param. CRITICAL: the `input` is a
 // single stable DOM node that is *moved* into the active param slot and restored
 // to `inputWrap` when command mode ends — never recreated. The caller supplies

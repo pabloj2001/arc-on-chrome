@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Builds the bar's DOM (host + shadow root + the single <style>) and returns
 // handles to every element the render/logic layers touch. Purely structural —
 // no event wiring or state; the entry attaches listeners to these refs.

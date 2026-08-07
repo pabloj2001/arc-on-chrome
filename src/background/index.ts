@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Service-worker entry. ALL listeners are registered synchronously at module
 // top (before any await) so an MV3 worker restart never misses an early command
 // or message. Handler logic lives in the sibling modules.
@@ -18,4 +17,4 @@ ensureAlarm();
 // that the Playwright harness referenced directly (e.g. `setContext`). esbuild's
 // IIFE wrapper hides them, so re-expose the few the harness needs. Harmless in
 // production — just a function reference on the worker's global.
-self.setContext = setContext;
+(self as unknown as { setContext: typeof setContext }).setContext = setContext;

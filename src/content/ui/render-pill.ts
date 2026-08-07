@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Renders the keyword-shortcut pill and keeps the input placeholder in sync.
 export function renderPill({ pill, input, activeShortcut, commandState, opensInCurrentTab }) {
   if (!pill) return;

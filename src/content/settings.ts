@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Pure (de)serialization of durable user settings — favorites + keyword
 // shortcuts. Contexts are ephemeral and intentionally excluded. The DOM-facing
 // clipboard/file plumbing stays in the content entry; this is just the data.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Builds the small index the bar searches: currently-open tabs plus the last
 // 7 days of history (capped). Only http(s) pages are included.
 import { WEB_URL } from "../shared/constants";

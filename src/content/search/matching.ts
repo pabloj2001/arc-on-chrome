@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Pure matching + ranking helpers over explicit inputs (no closure/DOM state).
 import { hostPath } from "../../shared/url";
 

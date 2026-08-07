@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The slash-command registry + name helpers. Each command declares a
 // `description`, a `params` list (each shown as a pill), and `run(args, ctx)`
 // where `ctx` is the effects object supplied by the content entry. Commands hold

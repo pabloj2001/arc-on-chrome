@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Renders the results list below the bar. Rows carry data-type for tests and
 // dispatch onChoose (click) / onHover (mousemove) back to the caller.
 import { faviconUrl } from "../../shared/url";

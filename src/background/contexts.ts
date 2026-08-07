@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Contexts: ephemeral tab groups the bar can create, switch, and delete. This
 // module owns their storage, lifecycle, expiry/alarms, and the tab-activity
 // timer reset — the single biggest background concern kept cohesive.
@@ -7,35 +6,60 @@ import {
   GROUP_COLORS, MAX_CONTEXTS,
 } from "../shared/constants";
 
+export type GroupColor = `${chrome.tabGroups.Color}`;
+
+// A tracked context: an ephemeral tab group with an inactivity expiry.
+export interface Context {
+  groupId: number;
+  name: string;
+  color: GroupColor;
+  durationMs: number;
+  lastActiveAt: number;
+}
+
+// The display slice sent to the bar (no timing fields).
+export interface ContextInfo {
+  groupId: number;
+  name: string;
+  color: GroupColor;
+}
+
+export interface ContextState {
+  activeContext: ContextInfo | null;
+  contexts: ContextInfo[];
+}
+
+type Responder = ((response?: unknown) => void) | undefined;
+
 // ---- Storage ---------------------------------------------------------------
 
-export function getContexts() {
+export function getContexts(): Promise<Context[]> {
   return new Promise((resolve) =>
     chrome.storage.local.get(CONTEXTS_KEY, (r) =>
       resolve(Array.isArray(r[CONTEXTS_KEY]) ? r[CONTEXTS_KEY] : [])
     )
   );
 }
-export function setContexts(list) {
+export function setContexts(list: Context[]): Promise<void> {
   return new Promise((resolve) =>
-    chrome.storage.local.set({ [CONTEXTS_KEY]: list }, resolve)
+    chrome.storage.local.set({ [CONTEXTS_KEY]: list }, () => resolve())
   );
 }
-export function getActiveContextId() {
+export function getActiveContextId(): Promise<number | null> {
   return new Promise((resolve) =>
     chrome.storage.local.get(ACTIVE_CONTEXT_KEY, (r) =>
-      resolve(r[ACTIVE_CONTEXT_KEY] != null ? r[ACTIVE_CONTEXT_KEY] : null)
+      resolve(r[ACTIVE_CONTEXT_KEY] != null ? (r[ACTIVE_CONTEXT_KEY] as number) : null)
     )
   );
 }
-export function setActiveContextId(id) {
+export function setActiveContextId(id: number | null): Promise<void> {
   return new Promise((resolve) =>
-    chrome.storage.local.set({ [ACTIVE_CONTEXT_KEY]: id }, resolve)
+    chrome.storage.local.set({ [ACTIVE_CONTEXT_KEY]: id }, () => resolve())
   );
 }
 
 // Resolves the active context's display info ({ groupId, name, color }) or null.
-export async function getActiveContext(cb) {
+export async function getActiveContext(cb: (info: ContextInfo | null) => void) {
   const id = await getActiveContextId();
   if (id == null) return cb(null);
   const ctx = (await getContexts()).find((c) => c.groupId === id);
@@ -44,7 +68,7 @@ export async function getActiveContext(cb) {
 
 // Resolves both the active context and the full tracked-contexts list (for the
 // numbered contexts row in the bar).
-export async function getContextState(cb) {
+export async function getContextState(cb: (state: ContextState) => void) {
   const id = await getActiveContextId();
   const contexts = await getContexts();
   const active = contexts.find((c) => c.groupId === id) || null;
@@ -63,7 +87,7 @@ export async function getContextState(cb) {
 // ---- Formatting ------------------------------------------------------------
 
 // "8h" / "1d" / "30m" -> milliseconds. Defaults to 24h when unset/invalid.
-export function parseExpiry(str) {
+export function parseExpiry(str: string): number {
   const m = String(str || "").trim().match(/^(\d+)\s*([mhd])$/i);
   if (!m) return DEFAULT_DURATION_MS;
   const n = parseInt(m[1], 10);
@@ -72,7 +96,7 @@ export function parseExpiry(str) {
   return n * mult;
 }
 
-export function fmtRemaining(ms) {
+export function fmtRemaining(ms: number): string {
   if (ms <= 0) return "0m";
   const mins = Math.round(ms / 60000);
   if (mins < 60) return mins + "m";
@@ -83,7 +107,7 @@ export function fmtRemaining(ms) {
   return rem ? `${days}d ${rem}h` : `${days}d`;
 }
 
-export function groupTitle(ctx, now) {
+export function groupTitle(ctx: Context, now: number): string {
   const remaining = ctx.durationMs - (now - ctx.lastActiveAt);
   return `${ctx.name} [${fmtRemaining(remaining)}]`;
 }
@@ -91,7 +115,12 @@ export function groupTitle(ctx, now) {
 // ---- Lifecycle -------------------------------------------------------------
 
 // Creates a group from the sender's current tab, tracks it, and makes it active.
-export async function setContext(sender, name, expiry, sendResponse) {
+export async function setContext(
+  sender: chrome.runtime.MessageSender,
+  name: string,
+  expiry: string,
+  sendResponse?: Responder
+) {
   const cleanName = String(name || "").trim();
   if (!cleanName) return clearActiveContext(sendResponse);
   const contexts = await getContexts();
@@ -110,7 +139,7 @@ export async function setContext(sender, name, expiry, sendResponse) {
       if (chrome.runtime.lastError || groupId == null) {
         return sendResponse && sendResponse({ ok: false });
       }
-      const ctx = {
+      const ctx: Context = {
         groupId,
         name: cleanName,
         color,
@@ -130,14 +159,14 @@ export async function setContext(sender, name, expiry, sendResponse) {
   });
 }
 
-export async function clearActiveContext(sendResponse) {
+export async function clearActiveContext(sendResponse?: Responder) {
   await setActiveContextId(null);
   sendResponse && sendResponse({ ok: true });
 }
 
 // Make a tracked context the active one (where new bar-opened tabs go). Does not
 // jump to its tabs — the bar stays where it is.
-export async function switchContext(groupId, sendResponse) {
+export async function switchContext(groupId: number, sendResponse?: Responder) {
   const contexts = await getContexts();
   const ctx = contexts.find((c) => c.groupId === groupId);
   if (!ctx) return sendResponse && sendResponse({ ok: false });
@@ -150,7 +179,7 @@ export async function switchContext(groupId, sendResponse) {
 }
 
 // Delete a context by name: close its group's tabs and drop the tracker.
-export async function deleteContext(name, sendResponse) {
+export async function deleteContext(name: string, sendResponse?: Responder) {
   const clean = String(name || "").trim().toLowerCase();
   const contexts = await getContexts();
   const idx = contexts.findIndex((c) => c.name.toLowerCase() === clean);
@@ -165,7 +194,7 @@ export async function deleteContext(name, sendResponse) {
 
 // Adds a freshly-created tab to a context group (guarding against a group that
 // no longer exists).
-export function addTabToContext(tab, groupId) {
+export function addTabToContext(tab: chrome.tabs.Tab | undefined, groupId: number | undefined) {
   if (!tab || tab.id == null || groupId == null) return;
   chrome.tabs.group({ tabIds: [tab.id], groupId }, () => {
     void chrome.runtime.lastError; // group may have been deleted
@@ -173,7 +202,7 @@ export function addTabToContext(tab, groupId) {
 }
 
 // Reset a tracked group's inactivity timer whenever one of its tabs is visited.
-export function onTabActivated({ tabId }) {
+export function onTabActivated({ tabId }: chrome.tabs.OnActivatedInfo) {
   chrome.tabs.get(tabId, async (tab) => {
     if (chrome.runtime.lastError || !tab) return;
     const gid = tab.groupId;
@@ -194,7 +223,7 @@ export function ensureAlarm() {
   });
 }
 
-export function onAlarm(alarm) {
+export function onAlarm(alarm: chrome.alarms.Alarm) {
   if (alarm.name === CONTEXT_ALARM) tickContexts();
 }
 
@@ -207,7 +236,7 @@ export async function tickContexts() {
   const contexts = await getContexts();
   if (!contexts.length) return;
   const activeId = await getActiveContextId();
-  const survivors = [];
+  const survivors: Context[] = [];
   for (const ctx of contexts) {
     const remaining = ctx.durationMs - (now - ctx.lastActiveAt);
     if (remaining <= 0) {
@@ -226,12 +255,12 @@ export async function tickContexts() {
   if (survivors.length !== contexts.length) await setContexts(survivors);
 }
 
-export function closeGroupTabs(groupId) {
+export function closeGroupTabs(groupId: number): Promise<void> {
   return new Promise((resolve) => {
     chrome.tabs.query({ groupId }, (tabs) => {
       if (chrome.runtime.lastError || !tabs || !tabs.length) return resolve();
       chrome.tabs.remove(
-        tabs.map((t) => t.id).filter((id) => id != null),
+        tabs.map((t) => t.id).filter((id): id is number => id != null),
         () => {
           void chrome.runtime.lastError;
           resolve();

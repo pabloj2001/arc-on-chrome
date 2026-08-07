@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Inline SVG path markup for the bar's leading icon (search) and its in-context
 // variant (back arrow → temporarily exit to the default space).
 export const ICON_SEARCH =

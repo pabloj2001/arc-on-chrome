@@ -1,4 +1,3 @@
-// @ts-nocheck
 // chrome.commands routing. Each command opens the same bar with different
 // options; we broadcast a TOGGLE message to the active tab's content script.
 import { MSG } from "../shared/messages";

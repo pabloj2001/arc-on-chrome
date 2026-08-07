@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Paints the ghost autocomplete overlay: the typed text (transparent, to occupy
 // width) followed by the completion `suffix` (faded). The caller computes the
 // suffix; this module only draws it.

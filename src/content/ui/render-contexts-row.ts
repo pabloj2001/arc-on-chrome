@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Numbered row of contexts above the bar: a "Default" chip (1) on the left, then
 // each tracked context, then a "+" chip (hidden at the limit). Clicks dispatch
 // via the onDefault/onSwitch/onAdd callbacks.

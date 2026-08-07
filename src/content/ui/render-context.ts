@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Tints the bar (border/icon/background) for the active context, or clears it.
 // The caller passes the *resolved* active context (null while temporarily
 // exited) and owns the status line.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Routes chrome.runtime messages from the content script to the right handler.
 // Returns true for handlers that reply asynchronously (keeps the channel open).
 import { MSG } from "../shared/messages";
