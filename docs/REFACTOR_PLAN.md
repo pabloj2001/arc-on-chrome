@@ -384,11 +384,13 @@ incrementally so `dist/` is always loadable.
    the pure JSON (de)serialization; clipboard/file plumbing stays in the entry),
    `content/search/matching.ts` (matchesQuery, templateBase, underBase, hostOf,
    computeDomainScores, and the pure `bestDomainMatch` ranking — the entry keeps a
-   thin guard wrapper), and `content/keyboard/combos.ts` (isToggleCombo/isUrlCombo).
-   The entry `import`s these; 17 new Vitest cases cover them (41 unit total).
-   typecheck clean; 50 e2e still green. **Remaining:** extract the command
-   registry/runner + data/index-client, then the reducer + effects with a
-   compatibility renderer (the original Phase 4/5 crux).
+   thin guard wrapper), `content/keyboard/combos.ts` (isToggleCombo/isUrlCombo),
+   and `content/commands/registry.ts` (the COMMANDS registry + usageOf +
+   bestCommandByPrefix — `unshortcut` now consults `ctx.hasShortcut` instead of
+   closure state). The entry `import`s these; 21 new Vitest cases cover them
+   (45 unit total). typecheck clean; 50 e2e still green. **Remaining:** extract
+   data/index-client, then the reducer + effects with a compatibility renderer
+   (the original Phase 4/5 crux).
 5. **Rebuild the `ui/` layer** — port `STYLES` → `bar.css` (one `<style>` in the
    shadow root, asserted by test), turn the render functions into clean
    framework-free `render-*.ts` modules driven by the reducer's effects. DOM refs
