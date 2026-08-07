@@ -159,6 +159,23 @@ The extension is compiled from `src/` into `dist/` (the folder Chrome loads):
 > unpacked id, which resets its stored settings. Run **`/export`** on the old build first,
 > then **`/import`** on the new one to carry your favorites + shortcuts across.
 
+## Updating
+
+To pull the latest version and rebuild in one step:
+
+```
+npm run update
+```
+
+This runs `scripts/update.sh`, which checks out and fast-forwards the default branch
+(`main`), installs dependencies (`npm ci` when a lockfile is present, else `npm install`),
+and runs `npm run build` to refresh `dist/`. When it finishes, reload the extension:
+
+1. Open `edge://extensions` (or `chrome://extensions`).
+2. Click the **reload ↻** icon on **Arc Search Bar**.
+
+(You can also run the script directly: `bash scripts/update.sh`.)
+
 ## Shortcuts
 
 Both shortcuts default to **reserved browser shortcuts** (`Cmd+T` = New Tab,

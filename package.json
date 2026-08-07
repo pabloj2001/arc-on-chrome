@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node build.mjs --dev --watch",
     "build": "node build.mjs",
+    "update": "bash scripts/update.sh",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
     "pretest": "node build.mjs",
