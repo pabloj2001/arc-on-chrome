@@ -6,7 +6,6 @@ import {
   normalizeUrl, buildUrl, applyShortcut, canon, hostPath,
   looksLikeNavigable,
 } from "../shared/url";
-import { groupHex, groupTextColor, tintBg } from "../shared/colors";
 import { MSG } from "../shared/messages";
 import {
   normalizeFavArray, buildSettingsExport, parseSettingsImport,
@@ -23,6 +22,8 @@ import { renderPill as renderPillView } from "./ui/render-pill";
 import { renderGhost as renderGhostView } from "./ui/render-ghost";
 import { renderFavorites as renderFavoritesView } from "./ui/render-favorites";
 import { renderResults as renderResultsView } from "./ui/render-results";
+import { renderContext as renderContextView } from "./ui/render-context";
+import { renderContextsRow as renderContextsRowView } from "./ui/render-contexts-row";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -427,29 +428,13 @@ import { renderResults as renderResultsView } from "./ui/render-results";
   // context's color (the context name is shown in the row above the bar).
   function renderContext() {
     if (!barEl) return;
-    if (contextActive()) {
-      const hex = groupHex(activeContext.color);
-      barEl.style.setProperty("--ctx-color", hex);
-      barEl.style.background = tintBg(hex);
-      if (iconEl) {
-        iconEl.innerHTML = ICON_BACK; // clickable back arrow -> exit to default
-        iconEl.style.color = hex;
-        iconEl.style.opacity = "1";
-        iconEl.classList.add("clickable");
-        iconEl.setAttribute("aria-label", "Back to default space");
-      }
-      barEl.classList.add("has-context");
-    } else {
-      barEl.style.background = "";
-      if (iconEl) {
-        iconEl.innerHTML = ICON_SEARCH;
-        iconEl.style.color = "";
-        iconEl.style.opacity = "";
-        iconEl.classList.remove("clickable");
-        iconEl.removeAttribute("aria-label");
-      }
-      barEl.classList.remove("has-context");
-    }
+    renderContextView({
+      bar: barEl,
+      icon: iconEl,
+      activeContext: contextActive() ? activeContext : null,
+      iconSearch: ICON_SEARCH,
+      iconBack: ICON_BACK,
+    });
     // Keep the bottom instruction in sync when nothing else owns the status.
     if (!activeShortcut && !commandState && !input.value.trim()) {
       status(idleStatus());
@@ -470,59 +455,14 @@ import { renderResults as renderResultsView } from "./ui/render-results";
   // Numbered row of contexts above the bar: a "0" default chip on the far left,
   // then each tracked context. Click (or Cmd/Ctrl+Shift+N) switches to one.
   function renderContextsRow() {
-    if (!contextsRowEl) return;
-    contextsRowEl.textContent = "";
-    if (!contextsList.length) {
-      contextsRowEl.style.display = "none";
-      return;
-    }
-    contextsRowEl.style.display = "flex";
-
-    // Default (no context) chip, number 1.
-    const def = document.createElement("button");
-    def.className = "ctx-chip ctx-default" + (!activeContext ? " active" : "");
-    def.title = "Default space (Ctrl+1)";
-    const dnum = document.createElement("span");
-    dnum.className = "ctx-num";
-    dnum.textContent = "1";
-    const dnm = document.createElement("span");
-    dnm.className = "ctx-cname";
-    dnm.textContent = "Default";
-    def.appendChild(dnum);
-    def.appendChild(dnm);
-    def.addEventListener("click", switchContextToDefault);
-    contextsRowEl.appendChild(def);
-
-    contextsList.forEach((c, i) => {
-      const hex = groupHex(c.color);
-      const chip = document.createElement("button");
-      chip.className =
-        "ctx-chip" +
-        (activeContext && activeContext.groupId === c.groupId ? " active" : "");
-      chip.style.background = hex;
-      chip.style.color = groupTextColor();
-      chip.title = `Switch to "${c.name}" (Ctrl+${i + 2})`;
-      const num = document.createElement("span");
-      num.className = "ctx-num";
-      num.textContent = String(i + 2);
-      const nm = document.createElement("span");
-      nm.className = "ctx-cname";
-      nm.textContent = c.name;
-      chip.appendChild(num);
-      chip.appendChild(nm);
-      chip.addEventListener("click", () => switchContextByGroupId(c.groupId));
-      contextsRowEl.appendChild(chip);
+    renderContextsRowView({
+      el: contextsRowEl,
+      contexts: contextsList,
+      activeContext,
+      onDefault: switchContextToDefault,
+      onSwitch: (groupId) => switchContextByGroupId(groupId),
+      onAdd: openContextCommand,
     });
-
-    // "+" chip to create a new context (hidden at the 5-context limit).
-    if (contextsList.length < MAX_CONTEXTS) {
-      const add = document.createElement("button");
-      add.className = "ctx-chip ctx-add";
-      add.title = "New context (Ctrl++)";
-      add.textContent = "+";
-      add.addEventListener("click", openContextCommand);
-      contextsRowEl.appendChild(add);
-    }
   }
 
   // Opens the /context command (with param pills) to create a new context.
