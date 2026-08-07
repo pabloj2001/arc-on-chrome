@@ -1,7 +1,6 @@
 // @ts-nocheck
 import {
   STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS, MAX_CONTEXTS,
-  HOST_ID, EXPORT_VERSION,
 } from "../shared/constants";
 import {
   normalizeUrl, buildUrl, applyShortcut, faviconUrl, canon, hostPath,
@@ -19,7 +18,7 @@ import {
 import { isToggleCombo, isUrlCombo } from "./keyboard/combos";
 import { COMMANDS, usageOf, bestCommandByPrefix } from "./commands/registry";
 import { ICON_SEARCH, ICON_BACK } from "./ui/icons";
-import STYLES from "./ui/bar.css";
+import { mountBar } from "./ui/mount";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -1413,96 +1412,29 @@ import STYLES from "./ui/bar.css";
     opensInCurrentTab = !!opts.opensInCurrentTab;
     defaultUrl = opts.defaultUrl || "";
 
-    host = document.createElement("div");
-    host.id = HOST_ID;
-    const shadow = host.attachShadow({ mode: "open" });
+    const refs = mountBar();
+    host = refs.host;
+    overlay = refs.overlay;
+    stack = refs.stack;
+    barEl = refs.bar;
+    iconEl = refs.icon;
+    input = refs.input;
+    inputWrap = refs.inputWrap;
+    ghostEl = refs.ghost;
+    pillEl = refs.pill;
+    cmdChipsEl = refs.cmdChips;
+    favRow = refs.favRow;
+    contextsRowEl = refs.contextsRow;
+    resultsEl = refs.results;
+    statusEl = refs.status;
 
-    const style = document.createElement("style");
-    style.textContent = STYLES;
-
-    overlay = document.createElement("div");
-    overlay.className = "backdrop";
-
-    stack = document.createElement("div");
-    stack.className = "stack";
-
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    barEl = bar;
-
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("class", "icon");
-    iconEl = icon;
-    icon.setAttribute("viewBox", "0 0 24 24");
-    icon.setAttribute("fill", "none");
-    icon.setAttribute("stroke", "currentColor");
-    icon.setAttribute("stroke-width", "2");
-    icon.setAttribute("stroke-linecap", "round");
-    icon.setAttribute("stroke-linejoin", "round");
-    icon.innerHTML = ICON_SEARCH;
     // Inside a context the icon is a back arrow that temporarily exits to default.
-    icon.addEventListener("click", () => {
+    iconEl.addEventListener("click", () => {
       if (contextActive()) exitContextTemporarily();
     });
-
-    input = document.createElement("input");
-    input.type = "text";
-    input.autocapitalize = "off";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-
-    // Wrap the input so the ghost autocomplete overlay can sit behind it.
-    inputWrap = document.createElement("div");
-    inputWrap.className = "input-wrap";
-    ghostEl = document.createElement("div");
-    ghostEl.className = "ghost";
-    ghostEl.style.display = "none";
-    inputWrap.appendChild(ghostEl);
-    inputWrap.appendChild(input);
-
-    pillEl = document.createElement("span");
-    pillEl.className = "pill";
-    pillEl.style.display = "none";
-    pillEl.title = "Click or backspace to remove";
     pillEl.addEventListener("click", () => {
       if (activeShortcut) dismissShortcutPill();
     });
-
-    cmdChipsEl = document.createElement("span");
-    cmdChipsEl.className = "cmd-chips";
-    cmdChipsEl.style.display = "none";
-
-    const chips = document.createElement("span");
-    chips.className = "chips";
-    chips.appendChild(pillEl);
-    chips.appendChild(cmdChipsEl);
-
-    favRow = document.createElement("div");
-    favRow.className = "faves";
-
-    contextsRowEl = document.createElement("div");
-    contextsRowEl.className = "contexts-row";
-    contextsRowEl.style.display = "none";
-
-    resultsEl = document.createElement("div");
-    resultsEl.className = "results";
-    resultsEl.style.display = "none";
-
-    statusEl = document.createElement("div");
-    statusEl.className = "status";
-
-    bar.appendChild(icon);
-    bar.appendChild(chips);
-    bar.appendChild(inputWrap);
-    stack.appendChild(contextsRowEl);
-    stack.appendChild(bar);
-    stack.appendChild(favRow);
-    stack.appendChild(resultsEl);
-    stack.appendChild(statusEl);
-    overlay.appendChild(stack);
-    shadow.appendChild(style);
-    shadow.appendChild(overlay);
-    document.documentElement.appendChild(host);
 
     applyInitialState();
     renderFavorites();
