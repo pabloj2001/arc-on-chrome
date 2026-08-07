@@ -46,3 +46,50 @@ test.describe("/export settings", () => {
     expect(data.shortcuts.go).toBe("https://go/%s");
   });
 });
+
+test.describe("/import settings", () => {
+  test("restores favorites + shortcuts from the clipboard", async ({ page, serviceWorker }) => {
+    const payload = JSON.stringify({
+      type: "arc-search-settings",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      favorites: ["https://example.com", null, null, null, null, null, null, null],
+      shortcuts: { dd: "https://duckduckgo.com/?q=%s" },
+    });
+    await h.openBarOn(page, serviceWorker);
+    await page.evaluate((t) => navigator.clipboard.writeText(t), payload);
+
+    await h.type(page, "/import");
+    await h.press(page, "Enter"); // enter param mode
+    await h.press(page, "Enter"); // submit with empty optional param
+    await h.sleep(400);
+
+    const s = await h.readState(page);
+    expect(s.status.toLowerCase()).toContain("imported");
+
+    const stored = await h.getStorage(serviceWorker, ["arcFavorites", "arcShortcuts"]);
+    expect(stored.arcFavorites[0]).toBe("https://example.com");
+    expect(stored.arcShortcuts.dd).toBe("https://duckduckgo.com/?q=%s");
+  });
+
+  test("rejects invalid JSON without changing settings", async ({ page, serviceWorker }) => {
+    await h.seedSettings(serviceWorker, {
+      favorites: ["https://github.com", null, null, null, null, null, null, null],
+      shortcuts: { gh: "https://github.com/search?q=%s" },
+    });
+    await h.openBarOn(page, serviceWorker);
+    await page.evaluate(() => navigator.clipboard.writeText("not json at all"));
+
+    await h.type(page, "/import");
+    await h.press(page, "Enter"); // enter param mode
+    await h.press(page, "Enter"); // submit with empty optional param
+    await h.sleep(400);
+
+    const s = await h.readState(page);
+    expect(s.status.toLowerCase()).toContain("invalid");
+
+    const stored = await h.getStorage(serviceWorker, ["arcFavorites", "arcShortcuts"]);
+    expect(stored.arcFavorites[0]).toBe("https://github.com");
+    expect(stored.arcShortcuts.gh).toBe("https://github.com/search?q=%s");
+  });
+});

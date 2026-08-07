@@ -3,7 +3,7 @@ const { chromium } = require("@playwright/test");
 const http = require("http");
 const path = require("path");
 
-const EXT_PATH = path.join(__dirname, "..", "..");
+const EXT_PATH = path.join(__dirname, "..", "..", "dist");
 
 // Run with visible windows only when HEADED=1; otherwise use Chromium's *new*
 // headless mode (`--headless=new`), which — unlike the old headless shell —
