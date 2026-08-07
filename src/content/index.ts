@@ -18,6 +18,8 @@ import {
 } from "./search/matching";
 import { isToggleCombo, isUrlCombo } from "./keyboard/combos";
 import { COMMANDS, usageOf, bestCommandByPrefix } from "./commands/registry";
+import { ICON_SEARCH, ICON_BACK } from "./ui/icons";
+import STYLES from "./ui/bar.css";
 
 (() => {
   // Only run in the top frame — avoids duplicate bars inside iframes and keeps
@@ -26,10 +28,7 @@ import { COMMANDS, usageOf, bestCommandByPrefix } from "./commands/registry";
   if (window.__arcSearchInjected) return;
   window.__arcSearchInjected = true;
 
-  const ICON_SEARCH =
-    '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
-  const ICON_BACK =
-    '<line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>';
+  // ICON_SEARCH / ICON_BACK now live in ./ui/icons; STYLES is ./ui/bar.css.
 
   let host = null;
   let overlay = null;
@@ -1405,206 +1404,7 @@ import { COMMANDS, usageOf, bestCommandByPrefix } from "./commands/registry";
     }
   }
 
-  const STYLES = `
-    :host { all: initial; }
-    .backdrop {
-      position: fixed; inset: 0; z-index: 2147483647;
-      display: flex; align-items: flex-start; justify-content: center;
-      background: rgba(0, 0, 0, 0.28); backdrop-filter: blur(2px);
-      animation: arc-fade 120ms ease-out;
-    }
-    .stack {
-      margin-top: 22vh; width: min(680px, 90vw);
-      display: flex; flex-direction: column; align-items: stretch; gap: 12px;
-      animation: arc-pop 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
-    }
-    .bar {
-      background: rgba(250, 250, 252, 0.98); border-radius: 16px;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06);
-      padding: 14px 18px; display: flex; align-items: center; gap: 12px;
-      overflow: hidden;
-    }
-    .bar.has-context {
-      box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 2px var(--ctx-color, #4b6cff);
-    }
-    .icon { width: 20px; height: 20px; flex: 0 0 auto; opacity: 0.5; pointer-events: none; }
-    .icon.clickable { pointer-events: auto; cursor: pointer; }
-    .icon.clickable:hover { opacity: 0.8 !important; }
-    .pill {
-      flex: 0 0 auto; display: none; align-items: center;
-      height: 28px; padding: 0 12px; border-radius: 9px;
-      background: #4b6cff; color: #fff; cursor: pointer;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 16px; font-weight: 600; line-height: 28px; white-space: nowrap;
-    }
-    .chips { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-    .cmd-chips { display: none; align-items: center; gap: 8px; }
-    .cmd-pill {
-      display: inline-flex; align-items: center; height: 28px; padding: 0 12px;
-      border-radius: 9px; background: #6b4bff; color: #fff; white-space: nowrap;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 16px; font-weight: 600; line-height: 28px;
-    }
-    .param-pill {
-      display: inline-flex; align-items: center; gap: 6px; height: 28px;
-      padding: 0 10px; border-radius: 9px; background: rgba(107,75,255,0.14);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 15px; line-height: 28px; white-space: nowrap; min-width: 0;
-    }
-    .param-pill .plabel { color: #9a86ff; font-size: 12px; flex: 0 0 auto; }
-    .param-pill .pval {
-      color: #1c1c1e; font-weight: 600;
-      max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .param-pill.upcoming { background: rgba(107,75,255,0.07); cursor: pointer; }
-    .param-pill.upcoming .plabel { color: #b3b3ba; }
-    .param-pill.filled { cursor: pointer; }
-    .param-pill.active { box-shadow: inset 0 0 0 1.5px rgba(107,75,255,0.55); }
-    .param-pill.invalid {
-      background: rgba(255,64,64,0.14) !important;
-      box-shadow: inset 0 0 0 1.5px rgba(255,64,64,0.85) !important;
-      animation: arc-shake 0.35s ease;
-    }
-    .param-pill.invalid .plabel { color: #ff5a5a !important; }
-    input.param-active {
-      flex: 0 0 auto; min-width: 1ch; padding: 0; background: transparent;
-      font-size: 15px; line-height: 28px; font-weight: 600; color: #1c1c1e;
-    }
-    input {
-      all: unset; flex: 1 1 auto;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 20px; line-height: 28px; color: #1c1c1e; caret-color: #4b6cff;
-    }
-    input::placeholder { color: #9a9aa2; }
-    .input-wrap { position: relative; flex: 1 1 auto; display: flex; min-width: 0; }
-    .input-wrap input { flex: 1 1 auto; position: relative; z-index: 1; }
-    .ghost {
-      position: absolute; inset: 0; z-index: 0; pointer-events: none;
-      display: none; align-items: center; white-space: pre; overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 20px; line-height: 28px;
-    }
-    .ghost .g-typed { color: transparent; }
-    .ghost .g-suffix { color: #b9b9c0; }
-    .result-ic {
-      width: 20px; height: 20px; flex: 0 0 auto; border-radius: 5px;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(107,75,255,0.16); color: #6b4bff; font-weight: 700; font-size: 14px;
-    }
-    .result-ic-svg { width: 18px; height: 18px; flex: 0 0 auto; color: #8a8a90; }
-    .faves { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-    .contexts-row {
-      display: none; gap: 8px; justify-content: center; flex-wrap: wrap;
-    }
-    .ctx-chip {
-      all: unset; box-sizing: border-box; cursor: pointer;
-      display: inline-flex; align-items: center; gap: 6px;
-      height: 30px; padding: 0 12px; border-radius: 10px; color: #fff;
-      background: #4b6cff; opacity: 0.82;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.22);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px; font-weight: 600; white-space: nowrap;
-      transition: transform 90ms ease, opacity 90ms ease;
-    }
-    .ctx-chip:hover { transform: translateY(-2px); opacity: 1; }
-    .ctx-chip.active { opacity: 1; box-shadow: 0 6px 18px rgba(0,0,0,0.28), 0 0 0 2px #fff; }
-    .ctx-chip.ctx-default {
-      background: rgba(120,120,128,0.9); color: #fff;
-    }
-    .ctx-chip.ctx-default.active { box-shadow: 0 6px 18px rgba(0,0,0,0.28), 0 0 0 2px #4b6cff; }
-    .ctx-chip.ctx-add {
-      background: #fff; color: #6a6a70;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.22);
-      font-size: 20px; font-weight: 500; line-height: 1; padding: 0 12px;
-    }
-    .ctx-chip.ctx-add:hover { background: #f2f2f4; color: #3a3a40; }
-    .ctx-chip .ctx-num {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px;
-      background: rgba(255,255,255,0.28); font-size: 11px; font-weight: 700;
-    }
-    .fave {
-      all: unset; box-sizing: border-box; position: relative;
-      width: 46px; height: 46px; border-radius: 12px; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(250, 250, 252, 0.95);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.06);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 15px; font-weight: 600; color: #8a8a90;
-      transition: transform 90ms ease, box-shadow 90ms ease;
-    }
-    .fave:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.28), 0 0 0 1px rgba(0,0,0,0.08); }
-    .fave.empty { background: #e6e6ea; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
-    .fave img { width: 24px; height: 24px; border-radius: 5px; display: block; }
-    .fave .badge {
-      position: absolute; bottom: -6px; right: -6px;
-      min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
-      background: #4b6cff; color: #fff; font-size: 10px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    }
-    .fave.empty .badge { display: none; }
-    .results {
-      background: rgba(250, 250, 252, 0.98); border-radius: 14px;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06);
-      padding: 6px; max-height: 248px; overflow-y: auto;
-    }
-    .result {
-      display: flex; align-items: center; gap: 12px;
-      padding: 9px 12px; border-radius: 10px; cursor: pointer;
-    }
-    .result.active { background: rgba(75, 108, 255, 0.16); }
-    .result img { width: 20px; height: 20px; border-radius: 5px; flex: 0 0 auto; }
-    .result .meta { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-    .result .title {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 15px; line-height: 19px; color: #1c1c1e;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .result .url {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 12px; line-height: 15px; color: #8a8a90;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .result .tag {
-      flex: 0 0 auto; margin-left: 8px; padding: 2px 8px; border-radius: 6px;
-      background: rgba(0,0,0,0.06); color: #6a6a70; font-size: 11px; font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .status {
-      min-height: 16px; text-align: center; white-space: pre-line;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 13px; line-height: 16px; color: #e8e8ea;
-      text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    }
-    @keyframes arc-fade { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes arc-shake {
-      0%, 100% { transform: translateX(0); }
-      25% { transform: translateX(-3px); }
-      75% { transform: translateX(3px); }
-    }
-    @keyframes arc-pop {
-      from { opacity: 0; transform: translateY(-8px) scale(0.98); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
-    }
-    @media (prefers-color-scheme: dark) {
-      .bar { background: rgba(30, 30, 33, 0.98); }
-      input { color: #f2f2f7; }
-      input::placeholder { color: #8a8a90; }
-      .ghost .g-suffix { color: #6a6a72; }
-      .fave { background: rgba(44, 44, 48, 0.98); color: #c7c7cc; }
-      .fave.empty { background: #3a3a3e; }
-      .results { background: rgba(30, 30, 33, 0.98); }
-      .result.active { background: rgba(75, 108, 255, 0.28); }
-      .result .title { color: #f2f2f7; }
-      .result .url { color: #9a9aa2; }
-      .result .tag { background: rgba(255,255,255,0.1); color: #c7c7cc; }
-      .param-pill .pval { color: #f2f2f7; }
-      .param-pill { background: rgba(107,75,255,0.28); }
-      input.param-active { color: #f2f2f7; }
-      .result-ic { background: rgba(107,75,255,0.30); color: #b9a8ff; }
-    }
-  `;
+  // STYLES moved to ./ui/bar.css (imported as text via esbuild).
 
   function open(opts) {
     if (isOpen) return;
