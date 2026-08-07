@@ -2,8 +2,10 @@
 // empty slot shows its number and starts a /favorite command (via onEmpty).
 import { FAV_COUNT } from "../../shared/constants";
 import { faviconUrl } from "../../shared/url";
+import type { Favorite } from "../../shared/types";
 
-export function renderFavorites({ favRow, favorites, onOpen, onEmpty }) {
+interface Deps { favRow: HTMLElement | null; favorites: Favorite[]; onOpen: (i: number) => void; onEmpty: (i: number) => void; }
+export function renderFavorites({ favRow, favorites, onOpen, onEmpty }: Deps) {
   if (!favRow) return;
   favRow.textContent = "";
   for (let i = 0; i < FAV_COUNT; i++) {

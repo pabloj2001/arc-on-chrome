@@ -25,8 +25,8 @@ export function isDarkScheme() {
   );
 }
 
-export function groupHex(color) {
-  const map = isDarkScheme() ? GROUP_COLOR_HEX_DARK : GROUP_COLOR_HEX;
+export function groupHex(color: string): string {
+  const map: Record<string, string> = isDarkScheme() ? GROUP_COLOR_HEX_DARK : GROUP_COLOR_HEX;
   return map[color] || (isDarkScheme() ? "#c8d3ff" : "#325ccd");
 }
 
@@ -36,7 +36,7 @@ export function groupTextColor() {
   return isDarkScheme() ? "#202124" : "#fff";
 }
 
-export function hexToRgb(hex) {
+export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
   if (!m) return null;
   const n = parseInt(m[1], 16);
@@ -45,7 +45,7 @@ export function hexToRgb(hex) {
 
 // A very faint version of the context color for the bar background, layered over
 // the bar's near-opaque surface so it stays readable in both modes.
-export function tintBg(hex) {
+export function tintBg(hex: string): string {
   const dark = isDarkScheme();
   const base = dark ? "rgba(30,30,33,0.98)" : "rgba(250,250,252,0.98)";
   const rgb = hexToRgb(hex);

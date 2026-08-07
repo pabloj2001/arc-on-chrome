@@ -3,7 +3,7 @@
 import { WEB_URL } from "../shared/constants";
 import { getContextState } from "./contexts";
 
-export function getIndex(sender, sendResponse) {
+export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   chrome.tabs.query({}, (tabs) => {
     const openTabs = tabs

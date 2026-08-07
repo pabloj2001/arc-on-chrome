@@ -7,7 +7,7 @@ import {
   addTabToContext, setContext, clearActiveContext, switchContext, deleteContext,
 } from "./contexts";
 
-export function onMessage(message, sender, sendResponse) {
+export function onMessage(message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
   if (!message) return;
   switch (message.type) {
     case MSG.SEARCH_SUBMIT:

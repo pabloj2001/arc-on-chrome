@@ -2,17 +2,20 @@
 // shortcuts. Contexts are ephemeral and intentionally excluded. The DOM-facing
 // clipboard/file plumbing stays in the content entry; this is just the data.
 import { FAV_COUNT, EXPORT_VERSION } from "../shared/constants";
+import type { Favorite, Shortcuts } from "../shared/types";
+import type { SettingsImport } from "./commands/types";
 
 // Pads/truncates a stored favorites array to exactly FAV_COUNT slots (null = empty).
-export function normalizeFavArray(arr) {
-  const out = new Array(FAV_COUNT).fill(null);
-  for (let i = 0; i < FAV_COUNT; i++) out[i] = (arr && arr[i]) || null;
+export function normalizeFavArray(arr: unknown): Favorite[] {
+  const src = Array.isArray(arr) ? arr : [];
+  const out: Favorite[] = new Array(FAV_COUNT).fill(null);
+  for (let i = 0; i < FAV_COUNT; i++) out[i] = src[i] || null;
   return out;
 }
 
 // Serializes favorites + shortcuts into a versioned JSON blob. /import reads
 // this same shape.
-export function buildSettingsExport(favorites, shortcuts) {
+export function buildSettingsExport(favorites: Favorite[], shortcuts: Shortcuts): string {
   return JSON.stringify(
     {
       type: "arc-search-settings",
@@ -28,7 +31,7 @@ export function buildSettingsExport(favorites, shortcuts) {
 
 // Parses a /export JSON blob and returns the durable settings, or null if the
 // shape/version isn't recognized. Tolerant of missing pieces.
-export function parseSettingsImport(text) {
+export function parseSettingsImport(text: string): SettingsImport | null {
   let data;
   try {
     data = JSON.parse(text);

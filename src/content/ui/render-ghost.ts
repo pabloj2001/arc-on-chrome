@@ -1,7 +1,8 @@
 // Paints the ghost autocomplete overlay: the typed text (transparent, to occupy
 // width) followed by the completion `suffix` (faded). The caller computes the
 // suffix; this module only draws it.
-export function renderGhost({ ghost, input, suffix }) {
+interface Deps { ghost: HTMLElement | null; input: HTMLInputElement | null; suffix: string; }
+export function renderGhost({ ghost, input, suffix }: Deps) {
   if (!ghost || !input) return;
   if (!suffix) {
     ghost.style.display = "none";

@@ -9,8 +9,8 @@ const COMMAND_OPTIONS = {
   "open-url-bar": { opensInCurrentTab: true, useCurrentUrl: true },
 };
 
-export function onCommand(command) {
-  const opts = COMMAND_OPTIONS[command];
+export function onCommand(command: string) {
+  const opts = COMMAND_OPTIONS[command as keyof typeof COMMAND_OPTIONS];
   if (!opts) return;
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];

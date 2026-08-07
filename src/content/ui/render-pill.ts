@@ -1,5 +1,12 @@
 // Renders the keyword-shortcut pill and keeps the input placeholder in sync.
-export function renderPill({ pill, input, activeShortcut, commandState, opensInCurrentTab }) {
+interface Deps {
+  pill: HTMLElement | null;
+  input: HTMLInputElement;
+  activeShortcut: string | null;
+  commandState: unknown | null;
+  opensInCurrentTab: boolean;
+}
+export function renderPill({ pill, input, activeShortcut, commandState, opensInCurrentTab }: Deps) {
   if (!pill) return;
   if (activeShortcut) {
     pill.textContent = activeShortcut;

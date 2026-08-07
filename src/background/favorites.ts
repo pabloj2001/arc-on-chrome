@@ -6,7 +6,7 @@ import { addTabToContext } from "./contexts";
 // If a tab already shows the favorite (exact URL preferred, else same-host
 // prefix), focus it (and its window); otherwise open the URL in a new tab
 // (added to the active context group when one is given).
-export function focusOrCreateTab(url, groupId) {
+export function focusOrCreateTab(url: string, groupId?: number) {
   const fav = parseUrl(url);
   chrome.tabs.query({}, (tabs) => {
     const parsed = tabs

@@ -4,12 +4,13 @@
 // no state of their own — anything mutable is reached through `ctx`.
 import { FAV_COUNT } from "../../shared/constants";
 import { normalizeUrl } from "../../shared/url";
+import type { Command, CommandCtx } from "./types";
 
-export const COMMANDS = {
+export const COMMANDS: Record<string, Command> = {
   favorite: {
     description: "Save a favorite for quick-open (Cmd+1-8).",
     params: [{ name: "1-8" }, { name: "url" }],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const idx = parseInt(args[0], 10);
       if (!idx || idx < 1 || idx > FAV_COUNT) {
         return ctx.status(`Usage: ${usageOf("favorite")}`);
@@ -23,7 +24,7 @@ export const COMMANDS = {
   unfavorite: {
     description: "Clear a saved favorite.",
     params: [{ name: "1-8" }],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const idx = parseInt(args[0], 10);
       if (!idx || idx < 1 || idx > FAV_COUNT) {
         return ctx.status(`Usage: ${usageOf("unfavorite")}`);
@@ -35,7 +36,7 @@ export const COMMANDS = {
   shortcut: {
     description: "Add a keyword search, e.g. /shortcut go https://go/%s",
     params: [{ name: "alias" }, { name: "url with %s" }],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const alias = (args[0] || "").trim().toLowerCase();
       const url = args.slice(1).join(" ").trim();
       if (!alias || /\s/.test(alias)) {
@@ -53,7 +54,7 @@ export const COMMANDS = {
   unshortcut: {
     description: "Remove a keyword search.",
     params: [{ name: "alias" }],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const alias = (args[0] || "").trim().toLowerCase();
       if (!alias || !ctx.hasShortcut(alias)) {
         return ctx.status(`No shortcut "${alias}"`);
@@ -65,14 +66,14 @@ export const COMMANDS = {
   export: {
     description: "Copy all settings (favorites + shortcuts) to the clipboard as JSON.",
     params: [],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       ctx.exportSettings();
     },
   },
   import: {
     description: "Restore settings from the clipboard (or a file) exported via /export.",
     params: [{ name: "json", optional: true }],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const pasted = args.join(" ").trim();
       ctx.importSettings(pasted || null);
     },
@@ -84,7 +85,7 @@ export const COMMANDS = {
       { name: "name", optional: true },
       { name: "expiry", optional: true },
     ],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const name = (args[0] || "").trim();
       const expiry = (args[1] || "").trim();
       if (!name) {
@@ -98,7 +99,7 @@ export const COMMANDS = {
   deletecontext: {
     description: "Delete a context: closes its tab group and stops tracking it.",
     params: [{ name: "name" }],
-    run: (args, ctx) => {
+    run: (args: string[], ctx: CommandCtx) => {
       const name = (args[0] || "").trim();
       if (!name) return ctx.status(`Usage: ${usageOf("deletecontext")}`);
       ctx.deleteContext(name);
@@ -107,7 +108,7 @@ export const COMMANDS = {
 };
 
 // "/name <required> [optional]" usage string derived from a command's params.
-export function usageOf(name) {
+export function usageOf(name: string): string {
   const cmd = COMMANDS[name];
   const params = (cmd.params || [])
     .map((p) => (p.optional ? `[${p.name}]` : `<${p.name}>`))
@@ -117,7 +118,7 @@ export function usageOf(name) {
 
 // The shortest command name that starts with `prefix` (for ghost completion +
 // prefix dispatch), or null. Excludes an exact match.
-export function bestCommandByPrefix(prefix) {
+export function bestCommandByPrefix(prefix: string): string | null {
   const p = prefix.toLowerCase();
   const cands = Object.keys(COMMANDS).filter((n) => n !== p && n.startsWith(p));
   if (!cands.length) return null;

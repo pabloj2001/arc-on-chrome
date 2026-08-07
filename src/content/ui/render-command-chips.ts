@@ -2,10 +2,21 @@
 // single stable DOM node that is *moved* into the active param slot and restored
 // to `inputWrap` when command mode ends — never recreated. The caller supplies
 // the width/pill/ghost effects and the jump-to-param handler.
+interface Deps {
+  cmdChips: HTMLElement | null;
+  inputWrap: HTMLElement | null;
+  input: HTMLInputElement;
+  ghost: HTMLElement | null;
+  commandState: import("./types").CommandState | null;
+  onRenderPill: () => void;
+  onUpdateWidth: () => void;
+  onJumpToParam: (i: number) => void;
+  onRenderGhost: () => void;
+}
 export function renderCommandChips({
   cmdChips, inputWrap, input, ghost, commandState,
   onRenderPill, onUpdateWidth, onJumpToParam, onRenderGhost,
-}) {
+}: Deps) {
   if (!cmdChips) return;
   // Detach the input before clearing so we don't destroy it, then re-place it.
   if (inputWrap) inputWrap.appendChild(input);

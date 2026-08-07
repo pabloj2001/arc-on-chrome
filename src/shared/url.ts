@@ -1,5 +1,6 @@
 // URL helpers shared by both bundles. All pure (no closure/DOM state) except
 // faviconUrl, which only needs chrome.runtime (present in content + worker).
+import type { UrlParts, HostPath } from "./types";
 
 export const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 // Intranet-style path, e.g. "go/glean" or "wiki/Main_Page" (single label + /).
@@ -9,7 +10,7 @@ export const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|gclsrc$|dclid$|msclkid$|mc_
 
 // Parses a URL into the parts we compare on: host without a leading "www.",
 // path without trailing slashes, and the query string.
-export function parseUrl(u) {
+export function parseUrl(u: string): UrlParts | null {
   try {
     const x = new URL(u);
     return {
@@ -25,14 +26,14 @@ export function parseUrl(u) {
 // A tab matches a favorite when they share a host and the favorite's path is a
 // prefix of the tab's path. A bare-domain favorite matches the tab it redirects
 // to; a favorite with a path only matches tabs under that path.
-export function tabMatchesFavorite(fav, tab) {
+export function tabMatchesFavorite(fav: UrlParts | HostPath | null, tab: UrlParts | HostPath | null): boolean {
   if (!fav || !tab || fav.host !== tab.host) return false;
   if (fav.path === "" || fav.path === tab.path) return true;
   return tab.path === fav.path || tab.path.startsWith(fav.path + "/");
 }
 
 // True when the whole (single-token) string is a URL/host on its own.
-export function looksLikeNavigable(q) {
+export function looksLikeNavigable(q: string): boolean {
   const s = q.trim();
   if (!s || /\s/.test(s)) return false; // spaces handled separately below
   if (HAS_SCHEME.test(s)) return true;
@@ -44,14 +45,14 @@ export function looksLikeNavigable(q) {
   return false;
 }
 
-export function schemeFor(s) {
+export function schemeFor(s: string): "http" | "https" {
   const host = s.split(/[/?#\s]/)[0].split(":")[0];
   return host.includes(".") ? "https" : "http";
 }
 
 // Builds a fully-encoded URL from raw input. Single-label hosts (go, localhost)
 // use http:// so corporate redirectors resolve; dotted/public hosts use https.
-export function normalizeUrl(u) {
+export function normalizeUrl(u: string): string | null {
   const s = (u || "").trim();
   if (!s) return null;
   const full = HAS_SCHEME.test(s) ? s : `${schemeFor(s)}://${s}`;
@@ -64,7 +65,7 @@ export function normalizeUrl(u) {
 
 // Resolves user input to a URL that opens in a tab. A navigable host/path is
 // handed to the browser as a URL; otherwise it becomes a Google search.
-export function buildUrl(query) {
+export function buildUrl(query: string): string | null {
   const q = query.trim();
   if (!q) return null;
   if (looksLikeNavigable(q)) return normalizeUrl(q);
@@ -75,13 +76,13 @@ export function buildUrl(query) {
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }
 
-export function ensureScheme(u) {
+export function ensureScheme(u: string): string {
   return HAS_SCHEME.test(u) ? u : `${schemeFor(u)}://${u}`;
 }
 
 // Substitutes the query into a shortcut template. `%s` is replaced with the
 // URL-encoded query; templates without `%s` get the query appended.
-export function applyShortcut(template, query) {
+export function applyShortcut(template: string, query: string): string {
   const q = (query || "").trim();
   const enc = encodeURIComponent(q);
   const url = template.includes("%s")
@@ -91,7 +92,7 @@ export function applyShortcut(template, query) {
 }
 
 // Chrome's favicon service URL for a page (needs the "favicon" permission).
-export function faviconUrl(pageUrl) {
+export function faviconUrl(pageUrl: string): string {
   return chrome.runtime.getURL(
     `_favicon/?pageUrl=${encodeURIComponent(pageUrl)}&size=64`
   );
@@ -100,7 +101,7 @@ export function faviconUrl(pageUrl) {
 // Canonical key for de-duplication: host without "www.", path without a
 // trailing slash, and the query with tracking params dropped and the rest
 // sorted so param order doesn't matter. Scheme and hash are ignored.
-export function canon(u) {
+export function canon(u: string): string {
   try {
     const x = new URL(u);
     const kept = [];
@@ -122,7 +123,7 @@ export function canon(u) {
 }
 
 // Host (sans "www.") + path (sans trailing slash), or null if unparseable.
-export function hostPath(u) {
+export function hostPath(u: string): HostPath | null {
   try {
     const x = new URL(u);
     return {

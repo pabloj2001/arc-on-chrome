@@ -2,8 +2,10 @@
 // The caller passes the *resolved* active context (null while temporarily
 // exited) and owns the status line.
 import { groupHex, tintBg } from "../../shared/colors";
+import type { ContextInfo } from "./types";
 
-export function renderContext({ bar, icon, activeContext, iconSearch, iconBack }) {
+interface Deps { bar: HTMLElement | null; icon: SVGElement | null; activeContext: ContextInfo | null; iconSearch: string; iconBack: string; }
+export function renderContext({ bar, icon, activeContext, iconSearch, iconBack }: Deps) {
   if (!bar) return;
   if (activeContext) {
     const hex = groupHex(activeContext.color);

@@ -3,8 +3,10 @@
 // via the onDefault/onSwitch/onAdd callbacks.
 import { groupHex, groupTextColor } from "../../shared/colors";
 import { MAX_CONTEXTS } from "../../shared/constants";
+import type { ContextInfo } from "./types";
 
-export function renderContextsRow({ el, contexts, activeContext, onDefault, onSwitch, onAdd }) {
+interface Deps { el: HTMLElement | null; contexts: ContextInfo[]; activeContext: ContextInfo | null; onDefault: () => void; onSwitch: (groupId: number) => void; onAdd: () => void; }
+export function renderContextsRow({ el, contexts, activeContext, onDefault, onSwitch, onAdd }: Deps) {
   if (!el) return;
   el.textContent = "";
   if (!contexts.length) {
@@ -28,7 +30,7 @@ export function renderContextsRow({ el, contexts, activeContext, onDefault, onSw
   def.addEventListener("click", onDefault);
   el.appendChild(def);
 
-  contexts.forEach((c, i) => {
+  contexts.forEach((c: ContextInfo, i: number) => {
     const hex = groupHex(c.color);
     const chip = document.createElement("button");
     chip.className =

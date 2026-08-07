@@ -1,18 +1,20 @@
 // Renders the results list below the bar. Rows carry data-type for tests and
 // dispatch onChoose (click) / onHover (mousemove) back to the caller.
 import { faviconUrl } from "../../shared/url";
+import type { ResultRow } from "./types";
 
 const SEARCH_ICON =
   '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';
 
-const TAG_LABEL = {
+const TAG_LABEL: Record<string, string> = {
   tab: "Open tab",
   command: "Command",
   domain: "Website",
   search: "Search",
 };
 
-export function renderResults({ el, items, activeIndex, onChoose, onHover }) {
+interface Deps { el: HTMLElement | null; items: ResultRow[]; activeIndex: number; onChoose: (i: number) => void; onHover: (i: number) => void; }
+export function renderResults({ el, items, activeIndex, onChoose, onHover }: Deps) {
   if (!el) return;
   el.textContent = "";
   if (!items.length) {
@@ -20,7 +22,7 @@ export function renderResults({ el, items, activeIndex, onChoose, onHover }) {
     return;
   }
   el.style.display = "block";
-  items.forEach((r, i) => {
+  items.forEach((r: ResultRow, i: number) => {
     const row = document.createElement("div");
     row.className = "result" + (i === activeIndex ? " active" : "");
     row.dataset.type = r.type;
