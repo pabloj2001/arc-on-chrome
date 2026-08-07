@@ -391,10 +391,15 @@ incrementally so `dist/` is always loadable.
    (45 unit total). typecheck clean; 50 e2e still green. **Remaining:** extract
    data/index-client, then the reducer + effects with a compatibility renderer
    (the original Phase 4/5 crux).
-5. **Rebuild the `ui/` layer** — port `STYLES` → `bar.css` (one `<style>` in the
-   shadow root, asserted by test), turn the render functions into clean
-   framework-free `render-*.ts` modules driven by the reducer's effects. DOM refs
-   consolidate in `mount.ts`.
+5. **Rebuild the `ui/` layer — 🚧 STARTED.** **Done:** ported `STYLES` →
+   `src/content/ui/bar.css` (imported as text via esbuild's css loader; the shadow
+   root still gets exactly one `<style>` with the same CSS, verified inlined in
+   `dist/` + by the keyboard spec), and the SVG icons → `src/content/ui/icons.ts`.
+   `src/types/css.d.ts` declares the `*.css` text import. **Remaining:** turn the
+   render functions (renderResults/renderFavorites/renderPill/renderCommandChips/
+   renderContextsRow/renderGhost) into framework-free `render-*.ts` modules driven
+   by the reducer's effects, with DOM refs consolidated in `mount.ts` — this needs
+   the reducer/effects layer below and is the deferred crux.
 6. **Harden** — remove `@ts-nocheck`, turn on `strict`, delete dead code, add
    source maps to dev build, final Vitest + Playwright pass, add the **`/import`**
    command if not already shipped, update README (build steps, "load unpacked
