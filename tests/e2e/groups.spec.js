@@ -69,6 +69,36 @@ test.describe("groups (Chrome tab groups)", () => {
     await other.close().catch(() => {});
   });
 
+  test("opening the bar adopts the current tab's group (ungrouped tab -> default, even with a group active)", async ({ page, context, serviceWorker, baseURL }) => {
+    // "work" is created from the fixture tab and becomes the globally-active group
+    await h.createGroup(serviceWorker, "work");
+    // open the bar on the grouped fixture tab -> adopts "work"
+    await h.openBarOn(page, serviceWorker);
+    expect((await h.readState(page)).hasGroup).toBe(true);
+    await h.press(page, "Escape");
+    // now view a brand-new ungrouped tab and open the bar normally (not cmd+L)
+    const other = await h.openTabAt(context, baseURL + "/plain");
+    await other.bringToFront();
+    await h.openBarOn(other, serviceWorker);
+    expect((await h.readState(other)).hasGroup).toBe(false); // adopts default, not "work"
+    await other.close().catch(() => {});
+  });
+
+  test("a tab opened from the bar on a grouped tab joins that tab's group", async ({ page, context, serviceWorker, baseURL }) => {
+    // group the fixture tab as "work"
+    const res = await h.createGroup(serviceWorker, "work");
+    // open the bar normally on the grouped tab and open a URL
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, baseURL + "/adopted");
+    await h.press(page, "Enter");
+    await h.sleep(600);
+    const inGroup = await serviceWorker.evaluate(
+      (gid) => new Promise((r) => chrome.tabs.query({ groupId: gid }, (t) => r(t.map((x) => x.url || x.pendingUrl || "")))),
+      res.groupId
+    );
+    expect(inGroup.some((u) => u.includes("/adopted"))).toBe(true);
+  });
+
   test("a tab opened from the bar while a group is active joins that group", async ({ page, serviceWorker, baseURL }) => {
     const res = await h.createGroup(serviceWorker, "work");
     await h.openBarOn(page, serviceWorker);

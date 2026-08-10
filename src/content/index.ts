@@ -841,7 +841,11 @@ declare global {
     }
   }
 
-  function loadIndex() {
+  // `adoptCurrentTabGroup` (set on open) makes the active group follow the tab
+  // you're viewing; mid-session refreshes (after /group or /deletegroup) pass
+  // false and keep the group those handlers just set, since `sender.tab`'s group
+  // snapshot is stale right after a regrouping.
+  function loadIndex(adoptCurrentTabGroup?: boolean) {
     chrome.runtime.sendMessage({ type: MSG.GET_INDEX }, (res) => {
       if (chrome.runtime.lastError || !res) return;
       openTabs = res.tabs || [];
@@ -849,15 +853,19 @@ declare global {
       currentTabId = res.currentTabId != null ? res.currentTabId : null;
       currentTabGroupId =
         res.currentTabGroupId != null ? res.currentTabGroupId : -1;
-      activeGroup = res.activeGroup || null;
       groupsList = res.groups || [];
-      // cmd+L acts on the current tab, so show the group that tab actually
-      // lives in (a different group than the selected group, or default when
-      // the tab isn't in a group) rather than the globally-active one.
-      if (opensInCurrentTab) {
+      // Opening the bar adopts the group of the tab you're viewing: if the
+      // current tab lives in a group, that becomes the active group (so tabs you
+      // open from the bar join it); an ungrouped tab means the default space.
+      // This overrides the globally-stored active group. The temporary-exit flag
+      // is left untouched here — applyInitialState resets it on each fresh open,
+      // so a mid-session refresh (e.g. a storage change) won't undo a ←/Backspace
+      // exit.
+      if (adoptCurrentTabGroup) {
         activeGroup =
           groupsList.find((c) => c.groupId === currentTabGroupId) || null;
-        groupTemporarilyExited = false;
+      } else {
+        activeGroup = res.activeGroup || null;
       }
       buildDomainScores();
       if (isOpen) {
@@ -1222,7 +1230,7 @@ declare global {
 
     applyInitialState();
     renderFavorites();
-    loadIndex();
+    loadIndex(true); // adopt the current tab's group on open
 
     // Clicking the backdrop closes; clicking anything else inside keeps input
     // focus (so favorite buttons work without the blur-close firing first).

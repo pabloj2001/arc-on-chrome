@@ -55,9 +55,11 @@ match the tab group), plus a **+** chip to create a new one. Switch with a click
 While a group is active the bar's border, search icon, and a faint background tint take on the
 group's color. Press **← (Left arrow)** at the start of the input — or **Backspace** while the
 bar is empty — to *temporarily* leave the group so the next tab opens in the default space; it
-returns the next time you open the bar. Opening the bar with the **URL shortcut (Cmd+L)** shows
-the group of the *current tab* (the group it belongs to, or the default space if it isn't in a
-group) instead of the globally-active one, since that command acts on the current tab.
+returns the next time you open the bar. **Opening the bar always adopts the group of the tab
+you're currently viewing** — if that tab is in a group, that group becomes active (so tabs you
+open from the bar join it); if it's ungrouped, the bar opens in the default space. This applies to
+the URL shortcut (**Cmd+L**) too, since every open follows the current tab rather than a
+separately-remembered "active" group.
 
 ### Tab expiry
 
