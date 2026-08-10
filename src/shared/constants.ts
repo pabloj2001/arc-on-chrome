@@ -4,23 +4,24 @@
 // Storage keys (chrome.storage.local)
 export const STORAGE_KEY = "arcFavorites";
 export const SHORTCUTS_KEY = "arcShortcuts";
-export const CONTEXTS_KEY = "arcContexts"; // [{ groupId, name, color, durationMs, lastActiveAt }]
-export const ACTIVE_CONTEXT_KEY = "arcActiveContextId"; // groupId | null
+export const ACTIVE_GROUP_KEY = "arcActiveGroupId"; // groupId | null
 
 // Tunables
 export const FAV_COUNT = 8;
 export const MAX_RESULTS = 10;
-export const MAX_CONTEXTS = 5;
 export const EXPORT_VERSION = 1;
 
 // DOM
 export const HOST_ID = "arc-search-bar-host";
 
-// Contexts / alarms
-export const CONTEXT_ALARM = "arc-context-check";
-export const DEFAULT_DURATION_MS = 24 * 60 * 60 * 1000;
+// Tab-expiry alarm + inactivity windows. Groups no longer expire as a unit;
+// individual tabs expire on inactivity (ungrouped sooner, grouped later), and a
+// tab group Chrome auto-removes once its last tab is closed.
+export const GROUP_ALARM = "arc-tab-expiry-check";
+export const UNGROUPED_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2h
+export const GROUPED_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 
-// Color names to cycle contexts through. Limited to colors whose Edge hex we
+// Color names to cycle new groups through. Limited to colors whose Edge hex we
 // map confidently (Edge's Fluent palette has no true red/green), so the bar's
 // pill color always matches the tab-strip chip.
 export const GROUP_COLORS: Array<`${chrome.tabGroups.Color}`> = [

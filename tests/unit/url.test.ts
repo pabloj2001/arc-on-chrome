@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseUrl, tabMatchesFavorite, looksLikeNavigable, schemeFor, normalizeUrl,
-  buildUrl, ensureScheme, applyShortcut, canon, hostPath,
+  buildUrl, ensureScheme, applyShortcut, canon, hostPath, isSafeNavigationUrl,
 } from "../../src/shared/url";
 
 describe("parseUrl", () => {
@@ -60,6 +60,30 @@ describe("buildUrl", () => {
     expect(buildUrl("hello world")).toBe(
       "https://www.google.com/search?q=hello%20world"
     );
+  });
+  it("never builds a javascript:/data: URL — falls back to a search", () => {
+    expect(buildUrl("javascript://%0aalert(1)")).toBe(
+      "https://www.google.com/search?q=javascript%3A%2F%2F%250aalert(1)"
+    );
+    expect(buildUrl("data://text/html,x")).toBe(
+      "https://www.google.com/search?q=data%3A%2F%2Ftext%2Fhtml%2Cx"
+    );
+  });
+});
+
+describe("isSafeNavigationUrl", () => {
+  it("rejects javascript:/data:/vbscript: and empty, accepts http(s)", () => {
+    expect(isSafeNavigationUrl("javascript:alert(1)")).toBe(false);
+    expect(isSafeNavigationUrl("JavaScript:alert(1)")).toBe(false);
+    expect(isSafeNavigationUrl("data:text/html,x")).toBe(false);
+    expect(isSafeNavigationUrl("vbscript:msgbox(1)")).toBe(false);
+    expect(isSafeNavigationUrl("")).toBe(false);
+    expect(isSafeNavigationUrl(null)).toBe(false);
+    expect(isSafeNavigationUrl("https://example.com/")).toBe(true);
+  });
+  it("normalizeUrl returns null for unsafe schemes", () => {
+    expect(normalizeUrl("javascript://%0aalert(1)")).toBeNull();
+    expect(normalizeUrl("javascript:alert(1)")).toBeNull();
   });
 });
 

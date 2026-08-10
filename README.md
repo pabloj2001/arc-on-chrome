@@ -34,39 +34,42 @@ A Chrome extension that replicates Arc's floating command/search bar.
   complete URL you've never visited still offers it as the top result.
 - **Search suggestion** — whenever there's at least one other suggestion, a **Search for "…"**
   row is inserted as the second result, so you can always fall back to a web search.
-- **Contexts** — group your work into expiring tab groups with `/context` (see below).
+- **Groups** — organize your work into Chrome tab groups with `/group` (see below).
 
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
 
-## Contexts (expiring tab groups)
+## Groups (Chrome tab groups)
 
-A **context** is an ephemeral browser tab group that tabs you open get collected into, and that
-cleans itself up after a period of inactivity.
+The bar's group switcher mirrors the **Chrome tab groups** you have open — including ones you
+create yourself from the browser UI. One group can be **active**, which is where tabs you open
+**from the bar** (searches, favorites, suggestions) get collected.
 
-- `/context <name> [expiry]` — create a context (max 5): makes a colored tab group named
-  `<name>`, moves the current tab into it, and makes it active. While a context is active, tabs
-  you open **from the bar** (searches, favorites, suggestions) go into that group. `expiry` is
-  `Nh` / `Nd` (e.g. `8h`, `1d`); it defaults to **24h**. Names must be unique.
-- `/context` with **no name** resets to the default space (the group itself stays until it
-  expires). `/deletecontext <name>` closes a context's group and stops tracking it.
-- The group is titled `<name> [<time remaining>]` and the countdown resets whenever you visit a
-  tab inside it. When it expires, the group's tabs are closed.
+- `/group <name>` — makes a colored tab group named `<name>`, moves the current tab into it,
+  and makes it active. While a group is active, tabs you open from the bar go into that group.
+- `/group` with **no name** returns to the default space (ungrouped). `/deletegroup <name>`
+  closes that group's tabs (Chrome removes the now-empty group).
 
-A row above the bar shows the **default space** and each context as numbered chips (colored to
+A row above the bar shows the **default space** and each open group as numbered chips (colored to
 match the tab group), plus a **+** chip to create a new one. Switch with a click or
-**Ctrl+1** (default), **Ctrl+2** (first context), … ; **Ctrl++** opens the new-context command.
-While a context is active the bar's border, search icon, and a faint background tint take on the
+**Ctrl+1** (default), **Ctrl+2** (first group), … ; **Ctrl++** opens the new-group command.
+While a group is active the bar's border, search icon, and a faint background tint take on the
 group's color. Press **← (Left arrow)** at the start of the input — or **Backspace** while the
-bar is empty — to *temporarily* leave the context so the next tab opens in the default space; it
+bar is empty — to *temporarily* leave the group so the next tab opens in the default space; it
 returns the next time you open the bar. Opening the bar with the **URL shortcut (Cmd+L)** shows
-the context of the *current tab* (the group it belongs to, or the default space if it isn't in a
-context) instead of the globally-active one, since that command acts on the current tab.
+the group of the *current tab* (the group it belongs to, or the default space if it isn't in a
+group) instead of the globally-active one, since that command acts on the current tab.
 
-Contexts are tracked in `chrome.storage.local` and survive browser restarts. A background alarm
-checks every minute: it closes + untracks expired groups and refreshes the remaining-time in
-each title. If a tracked group no longer exists (you closed it, or the browser reset its tabs)
-it is **kept** — not untracked — until it expires, so reopening closed tabs can land back in a
-live context.
+### Tab expiry
+
+Groups don't expire — **individual tabs** do, on inactivity, and Chrome removes a group once its
+last tab is gone. A background alarm checks every minute:
+
+- a tab **not in a group** is closed after **2 hours** of inactivity;
+- a tab **in a group** is closed after **24 hours** of inactivity;
+- a group whose tabs have all expired disappears automatically.
+
+The currently-active tab, pinned tabs, and the sole tab in a window are never auto-closed.
+"Inactivity" is measured from when a tab was last focused.
 
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
 
@@ -109,8 +112,8 @@ required parameters are empty they flash red instead.
 | `/unfavorite <1-8>` | Clear a favorite |
 | `/shortcut <alias> <url with %s>` | Add a keyword shortcut, e.g. `/shortcut go https://go/%s` |
 | `/unshortcut <alias>` | Remove a keyword shortcut |
-| `/context [name] [expiry]` | Start an expiring tab-group context (no name resets to default) |
-| `/deletecontext <name>` | Close a context's tab group and stop tracking it |
+| `/group [name]` | Create a Chrome tab group from the current tab (no name returns to default) |
+| `/deletegroup <name>` | Close a group's tabs (Chrome removes the empty group) |
 | `/export` | Copy all settings (favorites + shortcuts) to the clipboard as JSON |
 | `/import [json]` | Restore settings from the clipboard (or a file) exported via `/export` |
 
@@ -122,7 +125,7 @@ favorites; empty slots show their number and can be clicked to start a `/favorit
 
 Run **`/export`** to copy all your settings (favorites + keyword shortcuts) to the clipboard as
 versioned JSON (if the clipboard is unavailable it downloads a `arc-search-settings.json` file
-instead). Contexts are ephemeral and not included. Run **`/import`** to restore them — it reads
+instead). Groups are ephemeral and not included. Run **`/import`** to restore them — it reads
 the JSON from the clipboard, or falls back to a file picker (you can also paste the JSON directly
 after the command). This is the migration path across installs, including the upcoming built
 (`dist/`) version, which loads under a fresh extension id.
@@ -139,7 +142,7 @@ const COMMANDS = {
     params: [{ name: "arg" }, { name: "other" }], // each shown as a pill
     run: (args, ctx) => {
       // args: the param values in order
-      // ctx: { status, setFavorite, setShortcut, removeShortcut, hasShortcut, exportSettings, importSettings, setContext, clearContext, deleteContext, close, clearInput }
+      // ctx: { status, setFavorite, setShortcut, removeShortcut, hasShortcut, exportSettings, importSettings, setGroup, clearGroup, deleteGroup, close, clearInput }
       ctx.status("done");
     },
   },
@@ -211,7 +214,7 @@ HEADED=1 npm test                 # watch it drive a visible browser
 `npm test` builds first (via `pretest`) and loads the unpacked extension from `dist/` into
 Chromium's new headless mode (which supports extensions), serving its own pages from a local
 HTTP server (no internet dependency). It covers search/URL modes, favorites, keyword shortcuts,
-the results list + inline autocomplete, the command palette + param pills, contexts,
+the results list + inline autocomplete, the command palette + param pills, groups,
 keyboard/focus behavior, and `/export` + `/import`. Unit tests live in `tests/unit/`, e2e in
 `tests/e2e/`.
 
@@ -225,7 +228,7 @@ The extension is written as modular TypeScript in `src/` and bundled by esbuild
 src/
   shared/        # imported by BOTH bundles: url, colors, constants, messages
   background/    # service worker: index (listeners), commands, router,
-                 #   index-builder, favorites, contexts (lifecycle + alarms)
+                 #   index-builder, favorites, groups (tab-group mirror + tab expiry)
   content/       # the bar
     index.ts     #   entry: state + input/keyboard/dispatch + render wrappers
     settings.ts  #   export/import (de)serialization

@@ -1,0 +1,116 @@
+const { test, expect } = require("./fixtures");
+const h = require("./helpers");
+
+test.describe("groups (Chrome tab groups)", () => {
+  test("groups row shows a default chip (1), the group chip (2), and a + chip", async ({ page, serviceWorker }) => {
+    const res = await h.createGroup(serviceWorker, "work");
+    expect(res.ok).toBe(true);
+    await h.openBarOn(page, serviceWorker);
+    const s = await h.readState(page);
+    const def = s.groupChips.find((c) => c.isDefault);
+    const add = s.groupChips.find((c) => c.isAdd);
+    const work = s.groupChips.find((c) => c.name.includes("work"));
+    expect(def).toBeTruthy();
+    expect(def.num).toBe("1");
+    expect(work).toBeTruthy();
+    expect(work.num).toBe("2"); // default=1, first group=2
+    expect(add).toBeTruthy();
+    expect(s.hasGroup).toBe(true); // active group tints the bar
+  });
+
+  test("Ctrl+1 switches to default, Ctrl+2 switches to the first group", async ({ page, serviceWorker }) => {
+    await h.createGroup(serviceWorker, "work");
+    await h.openBarOn(page, serviceWorker);
+    await h.press(page, "Control+1"); // default
+    let s = await h.readState(page);
+    expect(s.hasGroup).toBe(false);
+    await h.press(page, "Control+2"); // back to the group
+    s = await h.readState(page);
+    expect(s.hasGroup).toBe(true);
+  });
+
+  test("Left-arrow at the start temporarily exits the group to default", async ({ page, serviceWorker }) => {
+    await h.createGroup(serviceWorker, "work");
+    await h.openBarOn(page, serviceWorker);
+    expect((await h.readState(page)).hasGroup).toBe(true);
+    await h.press(page, "ArrowLeft");
+    expect((await h.readState(page)).hasGroup).toBe(false);
+  });
+
+  test("Backspace on an empty bar temporarily exits the group", async ({ page, serviceWorker }) => {
+    await h.createGroup(serviceWorker, "work");
+    await h.openBarOn(page, serviceWorker);
+    expect((await h.readState(page)).hasGroup).toBe(true);
+    await h.press(page, "Backspace");
+    expect((await h.readState(page)).hasGroup).toBe(false);
+  });
+
+  test("clicking the back-arrow icon temporarily exits the group", async ({ page, serviceWorker }) => {
+    await h.createGroup(serviceWorker, "work");
+    await h.openBarOn(page, serviceWorker);
+    expect((await h.readState(page)).hasGroup).toBe(true);
+    await page.locator("#arc-search-bar-host").evaluate((host) => {
+      host.shadowRoot.querySelector(".icon").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await h.sleep(150);
+    expect((await h.readState(page)).hasGroup).toBe(false);
+  });
+
+  test("Cmd+L shows the current tab's group (default when the tab is ungrouped)", async ({ page, context, serviceWorker, baseURL }) => {
+    // active group is "work" (groups the fixture tab)
+    await h.createGroup(serviceWorker, "work");
+    // a brand-new ungrouped tab
+    const other = await h.openTabAt(context, baseURL + "/other");
+    await other.bringToFront();
+    await h.openBar(serviceWorker, { opensInCurrentTab: true, useCurrentUrl: true });
+    await h.waitForBar(other);
+    const s = await h.readState(other);
+    expect(s.hasGroup).toBe(false); // ungrouped tab -> default, not the active "work"
+    await other.close().catch(() => {});
+  });
+
+  test("a tab opened from the bar while a group is active joins that group", async ({ page, serviceWorker, baseURL }) => {
+    const res = await h.createGroup(serviceWorker, "work");
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, baseURL + "/joined");
+    await h.press(page, "Enter");
+    await h.sleep(600);
+    const inGroup = await serviceWorker.evaluate(
+      (gid) => new Promise((r) => chrome.tabs.query({ groupId: gid }, (t) => r(t.map((x) => x.url || x.pendingUrl || "")))),
+      res.groupId
+    );
+    expect(inGroup.some((u) => u.includes("/joined"))).toBe(true);
+  });
+
+  test("the switcher mirrors multiple open groups (no 5-group cap)", async ({ context, serviceWorker, baseURL }) => {
+    const pages = [];
+    for (let i = 0; i < 6; i++) {
+      const p = await h.openTabAt(context, `${baseURL}/g-${i}`);
+      await p.bringToFront();
+      const res = await h.createGroup(serviceWorker, `g${i}`);
+      expect(res.ok).toBe(true); // every group creates successfully — unbounded
+      pages.push(p);
+    }
+    const last = pages[pages.length - 1];
+    await h.openBarOn(last, serviceWorker);
+    const s = await h.readState(last);
+    const named = s.groupChips.filter((c) => !c.isDefault && !c.isAdd);
+    expect(named.length).toBeGreaterThanOrEqual(6);
+    for (const p of pages) await p.close().catch(() => {});
+  });
+
+  test("deletegroup closes the group's tabs", async ({ page, serviceWorker, baseURL }) => {
+    const res = await h.createGroup(serviceWorker, "temp");
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "/deletegroup");
+    await h.press(page, "Enter"); // choose the highlighted command
+    await h.type(page, "temp"); // fill the name param
+    await h.press(page, "Enter"); // run
+    await h.sleep(500);
+    const stillThere = await serviceWorker.evaluate(
+      (gid) => new Promise((r) => chrome.tabs.query({ groupId: gid }, (t) => r(t.length))),
+      res.groupId
+    );
+    expect(stillThere).toBe(0);
+  });
+});

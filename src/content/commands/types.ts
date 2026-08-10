@@ -15,9 +15,9 @@ export interface CommandCtx {
   hasShortcut: (alias: string) => boolean;
   exportSettings: () => void;
   importSettings: (pasted: string | null) => void;
-  setContext: (name: string, expiry: string) => void;
-  clearContext: () => void;
-  deleteContext: (name: string) => void;
+  setGroup: (name: string) => void;
+  clearGroup: () => void;
+  deleteGroup: (name: string) => void;
   close?: () => void;
   clearInput?: () => void;
 }

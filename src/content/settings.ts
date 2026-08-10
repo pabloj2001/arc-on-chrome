@@ -1,5 +1,5 @@
 // Pure (de)serialization of durable user settings — favorites + keyword
-// shortcuts. Contexts are ephemeral and intentionally excluded. The DOM-facing
+// shortcuts. Groups are ephemeral and intentionally excluded. The DOM-facing
 // clipboard/file plumbing stays in the content entry; this is just the data.
 import { FAV_COUNT, EXPORT_VERSION } from "../shared/constants";
 import type { Favorite, Shortcuts } from "../shared/types";

@@ -1,7 +1,7 @@
 // Builds the small index the bar searches: currently-open tabs plus the last
 // 7 days of history (capped). Only http(s) pages are included.
 import { WEB_URL } from "../shared/constants";
-import { getContextState } from "./contexts";
+import { getGroupState } from "./groups";
 
 export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -28,7 +28,7 @@ export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (re
             lastVisitTime: h.lastVisitTime || 0,
             visitCount: h.visitCount || 1,
           }));
-        getContextState((state) => {
+        getGroupState((state) => {
           sendResponse({
             currentTabId: sender.tab && sender.tab.id,
             currentTabGroupId:
@@ -37,8 +37,8 @@ export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (re
                 : -1,
             tabs: openTabs,
             history,
-            activeContext: state.activeContext, // { groupId, name, color } or null
-            contexts: state.contexts, // [{ groupId, name, color }]
+            activeGroup: state.activeGroup, // { groupId, name, color } or null
+            groups: state.groups, // [{ groupId, name, color }]
           });
         });
       }

@@ -1,8 +1,8 @@
 // View-model types for the render-* modules.
-import type { ContextInfo } from "../../background/contexts";
+import type { GroupInfo } from "../../background/groups";
 import type { Favorite } from "../../shared/types";
 
-export type { ContextInfo };
+export type { GroupInfo };
 
 // A row in the results list.
 export interface ResultRow {

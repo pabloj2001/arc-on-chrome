@@ -1,9 +1,9 @@
 import {
-  STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS, MAX_CONTEXTS,
+  STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS,
 } from "../shared/constants";
 import {
   normalizeUrl, buildUrl, applyShortcut, canon, hostPath,
-  looksLikeNavigable,
+  looksLikeNavigable, isSafeNavigationUrl,
 } from "../shared/url";
 import { MSG } from "../shared/messages";
 import {
@@ -21,12 +21,12 @@ import { renderPill as renderPillView } from "./ui/render-pill";
 import { renderGhost as renderGhostView } from "./ui/render-ghost";
 import { renderFavorites as renderFavoritesView } from "./ui/render-favorites";
 import { renderResults as renderResultsView } from "./ui/render-results";
-import { renderContext as renderContextView } from "./ui/render-context";
-import { renderContextsRow as renderContextsRowView } from "./ui/render-contexts-row";
+import { renderGroup as renderGroupView } from "./ui/render-group";
+import { renderGroupsRow as renderGroupsRowView } from "./ui/render-groups-row";
 import { renderCommandChips as renderCommandChipsView } from "./ui/render-command-chips";
 import type { Favorite, Shortcuts, TabItem, HistoryItem } from "../shared/types";
 import type { CommandCtx } from "./commands/types";
-import type { ResultRow, CommandState, ContextInfo } from "./ui/types";
+import type { ResultRow, CommandState, GroupInfo } from "./ui/types";
 
 declare global {
   interface Window {
@@ -54,7 +54,7 @@ declare global {
   let pillEl: HTMLSpanElement | null = null;
   let cmdChipsEl: HTMLSpanElement | null = null;
   let favRow: HTMLDivElement | null = null;
-  let contextsRowEl: HTMLDivElement | null = null;
+  let groupsRowEl: HTMLDivElement | null = null;
   let resultsEl: HTMLDivElement | null = null;
   let statusEl: HTMLDivElement | null = null;
   let isOpen = false;
@@ -75,10 +75,10 @@ declare global {
   let ghostSuffix = ""; // current inline-autocomplete completion (after the caret)
   let typedQuery = ""; // the user's actual typed text (preserved while navigating)
   let navigating = false; // true while previewing a highlighted suggestion's URL
-  let activeContext: ContextInfo | null = null; // { groupId, name, color } or null
-  let contextsList: ContextInfo[] = []; // all tracked contexts [{ groupId, name, color }]
+  let activeGroup: GroupInfo | null = null; // { groupId, name, color } or null
+  let groupsList: GroupInfo[] = []; // all groups [{ groupId, name, color }]
   let currentTabGroupId = -1; // group id of the tab the bar was opened over (-1 = none)
-  let contextTemporarilyExited = false; // one-shot "use the default space" for this bar open
+  let groupTemporarilyExited = false; // one-shot "use the default space" for this bar open
 
   // ---- Favorites / shortcuts persistence -------------------------------------
   // normalizeFavArray now lives in ./settings.
@@ -249,48 +249,42 @@ declare global {
           viaFile();
         }
       },
-      setContext: (name: string, expiry: string) => {
+      setGroup: (name: string) => {
         chrome.runtime.sendMessage(
-          { type: MSG.SET_CONTEXT, name, expiry },
+          { type: MSG.SET_GROUP, name },
           (res) => {
             if (chrome.runtime.lastError || !res) return;
             if (!res.ok) {
-              status(
-                res.reason === "duplicate"
-                  ? `A context named "${name}" already exists`
-                  : res.reason === "limit"
-                  ? "Context limit reached (max 5) — delete one first"
-                  : "Couldn't create context"
-              );
+              status("Couldn't create group");
               return;
             }
-            activeContext = { groupId: res.groupId, name: res.name, color: res.color };
-            contextTemporarilyExited = false;
-            status(`Context "${res.name}" created`);
-            renderContext();
-            loadIndex(); // refresh the contexts row
+            activeGroup = { groupId: res.groupId, name: res.name, color: res.color };
+            groupTemporarilyExited = false;
+            status(`Group "${res.name}" created`);
+            renderGroup();
+            loadIndex(); // refresh the groups row
           }
         );
       },
-      clearContext: () => {
-        chrome.runtime.sendMessage({ type: MSG.CLEAR_CONTEXT }, () => {
+      clearGroup: () => {
+        chrome.runtime.sendMessage({ type: MSG.CLEAR_GROUP }, () => {
           void chrome.runtime.lastError;
         });
-        activeContext = null;
-        contextTemporarilyExited = false;
-        renderContext();
+        activeGroup = null;
+        groupTemporarilyExited = false;
+        renderGroup();
       },
-      deleteContext: (name: string) => {
+      deleteGroup: (name: string) => {
         chrome.runtime.sendMessage(
-          { type: MSG.DELETE_CONTEXT, name },
+          { type: MSG.DELETE_GROUP, name },
           (res) => {
             if (chrome.runtime.lastError || !res) return;
             if (!res.ok) {
-              status(`No context named "${name}"`);
+              status(`No group named "${name}"`);
               return;
             }
-            status(`Deleted context "${res.name}"`);
-            loadIndex(); // refresh row + active context
+            status(`Deleted group "${res.name}"`);
+            loadIndex(); // refresh row + active group
           }
         );
       },
@@ -412,35 +406,35 @@ declare global {
     cmd.run(args, commandCtx()); // shows a status notification
   }
 
-  // ---- Context (ephemeral tab group) -----------------------------------------
+  // ---- Groups (mirror of Chrome tab groups) -----------------------------------------
 
-  function contextActive() {
-    return !!activeContext && !contextTemporarilyExited;
+  function groupActive() {
+    return !!activeGroup && !groupTemporarilyExited;
   }
 
-  function contextGroupIdForDispatch() {
-    return contextActive() ? activeContext.groupId : null;
+  function dispatchGroupId() {
+    return groupActive() ? activeGroup.groupId : null;
   }
 
-  // Instruction shown under the suggestions while a context is active.
+  // Instruction shown under the suggestions while a group is active.
   function idleStatus() {
-    if (contextActive()) {
-      return "← exit context to open in the default space";
+    if (groupActive()) {
+      return "← exit group to open in the default space";
     }
-    if (activeContext && contextTemporarilyExited) {
-      return "Default space — reopen the bar to return to the context";
+    if (activeGroup && groupTemporarilyExited) {
+      return "Default space — reopen the bar to return to the group";
     }
     return "";
   }
 
   // Tints the bar's border, search icon, and background with the active
-  // context's color (the context name is shown in the row above the bar).
-  function renderContext() {
+  // group's color (the group name is shown in the row above the bar).
+  function renderGroup() {
     if (!barEl) return;
-    renderContextView({
+    renderGroupView({
       bar: barEl,
       icon: iconEl,
-      activeContext: contextActive() ? activeContext : null,
+      activeGroup: groupActive() ? activeGroup : null,
       iconSearch: ICON_SEARCH,
       iconBack: ICON_BACK,
     });
@@ -452,67 +446,63 @@ declare global {
 
   // tintBg/hexToRgb now live in ../shared/colors.
 
-  // One-shot: leave the context for this bar session so the next tab opens in the
-  // default space. The context stays active and returns when the bar reopens.
-  function exitContextTemporarily() {
-    if (!contextActive()) return;
-    contextTemporarilyExited = true;
-    renderContext();
+  // One-shot: leave the group for this bar session so the next tab opens in the
+  // default space. The group stays active and returns when the bar reopens.
+  function exitGroupTemporarily() {
+    if (!groupActive()) return;
+    groupTemporarilyExited = true;
+    renderGroup();
     status(idleStatus());
   }
 
-  // Numbered row of contexts above the bar: a "0" default chip on the far left,
-  // then each tracked context. Click (or Cmd/Ctrl+Shift+N) switches to one.
-  function renderContextsRow() {
-    renderContextsRowView({
-      el: contextsRowEl,
-      contexts: contextsList,
-      activeContext,
-      onDefault: switchContextToDefault,
-      onSwitch: (groupId) => switchContextByGroupId(groupId),
-      onAdd: openContextCommand,
+  // Numbered row of open groups above the bar: a "Default" chip on the left,
+  // then each open group. Click (or Ctrl+N) switches to one.
+  function renderGroupsRow() {
+    renderGroupsRowView({
+      el: groupsRowEl,
+      groups: groupsList,
+      activeGroup,
+      onDefault: switchToDefault,
+      onSwitch: (groupId) => switchGroupByGroupId(groupId),
+      onAdd: openGroupCommand,
     });
   }
 
-  // Opens the /context command (with param pills) to create a new context.
-  function openContextCommand() {
-    if (contextsList.length >= MAX_CONTEXTS) {
-      status("Context limit reached (max 5) — delete one first");
-      return;
-    }
-    enterCommandMode("context", "", "/context");
+  // Opens the /group command (with param pills) to create a new group.
+  function openGroupCommand() {
+    enterCommandMode("group", "", "/group");
   }
 
-  // Switching just changes the active context (where new bar-opened tabs go);
+  // Switching just changes the active group (where new bar-opened tabs go);
   // the bar stays open and its pill/border update.
-  function switchContextByGroupId(groupId: number) {
+  function switchGroupByGroupId(groupId: number) {
     chrome.runtime.sendMessage(
-      { type: MSG.SWITCH_CONTEXT, groupId },
+      { type: MSG.SWITCH_GROUP, groupId },
       (res) => {
         if (chrome.runtime.lastError || !res || !res.ok) return;
-        activeContext = res.activeContext || null;
-        contextTemporarilyExited = false;
-        renderContext();
-        renderContextsRow();
+        activeGroup = res.activeGroup || null;
+        groupTemporarilyExited = false;
+        renderGroup();
+        renderGroupsRow();
       }
     );
   }
 
-  function switchContextToDefault() {
-    chrome.runtime.sendMessage({ type: MSG.CLEAR_CONTEXT }, () => {
+  function switchToDefault() {
+    chrome.runtime.sendMessage({ type: MSG.CLEAR_GROUP }, () => {
       void chrome.runtime.lastError;
     });
-    activeContext = null;
-    contextTemporarilyExited = false;
-    renderContext();
-    renderContextsRow();
+    activeGroup = null;
+    groupTemporarilyExited = false;
+    renderGroup();
+    renderGroupsRow();
   }
 
-  // `digit` is the Ctrl+N number: 1 = default space, 2 = first context, etc.
-  function switchContextByIndex(digit: number) {
-    if (digit === 1) return switchContextToDefault();
-    const ctx = contextsList[digit - 2];
-    if (ctx) switchContextByGroupId(ctx.groupId);
+  // `digit` is the Ctrl+N number: 1 = default space, 2 = first group, etc.
+  function switchGroupByIndex(digit: number) {
+    if (digit === 1) return switchToDefault();
+    const g = groupsList[digit - 2];
+    if (g) switchGroupByGroupId(g.groupId);
   }
 
   // ---- Shortcut pill ---------------------------------------------------------
@@ -832,20 +822,21 @@ declare global {
       // A typed base domain, explicit search, or a chosen history entry always
       // navigates to that exact URL (new tab, or current tab for cmd+L) — never
       // switch to some other open tab that merely shares the domain.
-      if (opensInCurrentTab) location.assign(r.url);
-      else
+      if (opensInCurrentTab) {
+        if (isSafeNavigationUrl(r.url)) location.assign(r.url);
+      } else
         chrome.runtime.sendMessage({
           type: MSG.SEARCH_SUBMIT,
           url: r.url,
-          groupId: contextGroupIdForDispatch(),
+          groupId: dispatchGroupId(),
         });
     } else if (opensInCurrentTab) {
-      location.assign(r.url); // cmd+L: replace the current page
+      if (isSafeNavigationUrl(r.url)) location.assign(r.url); // cmd+L: replace the current page
     } else {
       chrome.runtime.sendMessage({
         type: MSG.OPEN_FAVORITE,
         url: r.url,
-        groupId: contextGroupIdForDispatch(),
+        groupId: dispatchGroupId(),
       });
     }
   }
@@ -858,20 +849,20 @@ declare global {
       currentTabId = res.currentTabId != null ? res.currentTabId : null;
       currentTabGroupId =
         res.currentTabGroupId != null ? res.currentTabGroupId : -1;
-      activeContext = res.activeContext || null;
-      contextsList = res.contexts || [];
-      // cmd+L acts on the current tab, so show the context that tab actually
-      // lives in (a different group than the selected context, or default when
-      // the tab isn't in a tracked context) rather than the globally-active one.
+      activeGroup = res.activeGroup || null;
+      groupsList = res.groups || [];
+      // cmd+L acts on the current tab, so show the group that tab actually
+      // lives in (a different group than the selected group, or default when
+      // the tab isn't in a group) rather than the globally-active one.
       if (opensInCurrentTab) {
-        activeContext =
-          contextsList.find((c) => c.groupId === currentTabGroupId) || null;
-        contextTemporarilyExited = false;
+        activeGroup =
+          groupsList.find((c) => c.groupId === currentTabGroupId) || null;
+        groupTemporarilyExited = false;
       }
       buildDomainScores();
       if (isOpen) {
-        renderContext();
-        renderContextsRow();
+        renderGroup();
+        renderGroupsRow();
         refreshResults();
         renderGhost();
       }
@@ -1013,18 +1004,18 @@ declare global {
       return;
     }
 
-    // Ctrl+1-9 switches context (1 = default, 2 = first context, ...); Cmd+1-8
+    // Ctrl+1-9 switches group (1 = default, 2 = first group, ...); Cmd+1-8
     // opens the Nth favorite. On macOS metaKey = Cmd, ctrlKey = Ctrl. Uses e.code
     // so the physical digit is used regardless of modifiers.
     if (!e.altKey && !e.shiftKey) {
       const digit = /^Digit([0-9])$/.exec(e.code);
       if (digit) {
         const n = parseInt(digit[1], 10);
-        // Ctrl (without Cmd) -> switch context.
+        // Ctrl (without Cmd) -> switch group.
         if (e.ctrlKey && !e.metaKey && n >= 1) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          switchContextByIndex(n); // 1 = default, 2..N = context
+          switchGroupByIndex(n); // 1 = default, 2..N = group
           return;
         }
         // Cmd (without Ctrl) -> open favorite.
@@ -1037,7 +1028,7 @@ declare global {
       }
     }
 
-    // Ctrl++ (or Ctrl+=) opens the /context command to create a new context.
+    // Ctrl++ (or Ctrl+=) opens the /group command to create a new group.
     if (
       e.ctrlKey &&
       !e.metaKey &&
@@ -1046,7 +1037,7 @@ declare global {
     ) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      openContextCommand();
+      openGroupCommand();
       return;
     }
 
@@ -1065,11 +1056,11 @@ declare global {
       completeGhost();
       return;
     }
-    // Left arrow at the start of the input, while in a context, temporarily
+    // Left arrow at the start of the input, while in a group, temporarily
     // exits it so the next tab opens in the default space.
     if (
       e.key === "ArrowLeft" &&
-      contextActive() &&
+      groupActive() &&
       !navigating &&
       input &&
       input.selectionStart === 0 &&
@@ -1077,7 +1068,7 @@ declare global {
     ) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      exitContextTemporarily();
+      exitGroupTemporarily();
       return;
     }
     if (e.key === "ArrowDown") {
@@ -1132,14 +1123,14 @@ declare global {
       dismissShortcutPill();
     } else if (
       e.key === "Backspace" &&
-      contextActive() &&
+      groupActive() &&
       input &&
       input.value === ""
     ) {
-      // Empty bar + backspace inside a context temporarily exits it (like ←),
+      // Empty bar + backspace inside a group temporarily exits it (like ←),
       // so the next tab opens in the default space.
       e.preventDefault();
-      exitContextTemporarily();
+      exitGroupTemporarily();
     }
   }
 
@@ -1172,7 +1163,7 @@ declare global {
       status(`Favorite ${i + 1} is empty. Set it with /favorite ${i + 1} <url>`);
       return;
     }
-    const groupId = contextGroupIdForDispatch();
+    const groupId = dispatchGroupId();
     close();
     // Switch to an existing tab with this URL if one is open, else new tab.
     chrome.runtime.sendMessage({ type: MSG.OPEN_FAVORITE, url, groupId });
@@ -1217,13 +1208,13 @@ declare global {
     pillEl = refs.pill;
     cmdChipsEl = refs.cmdChips;
     favRow = refs.favRow;
-    contextsRowEl = refs.contextsRow;
+    groupsRowEl = refs.groupsRow;
     resultsEl = refs.results;
     statusEl = refs.status;
 
-    // Inside a context the icon is a back arrow that temporarily exits to default.
+    // Inside a group the icon is a back arrow that temporarily exits to default.
     iconEl.addEventListener("click", () => {
-      if (contextActive()) exitContextTemporarily();
+      if (groupActive()) exitGroupTemporarily();
     });
     pillEl.addEventListener("click", () => {
       if (activeShortcut) dismissShortcutPill();
@@ -1328,13 +1319,13 @@ declare global {
     commandState = null;
     activeIndex = -1;
     navigating = false;
-    contextTemporarilyExited = false; // context returns on each fresh open
+    groupTemporarilyExited = false; // group returns on each fresh open
     typedQuery = defaultUrl || "";
     input.value = defaultUrl || "";
     renderCommandChips();
     renderPill();
-    renderContext();
-    renderContextsRow();
+    renderGroup();
+    renderGroupsRow();
     if (defaultUrl) input.select(); // highlight the prefilled URL for easy replace
     status(idleStatus());
     refreshResults();
@@ -1342,9 +1333,9 @@ declare global {
   }
 
   // Sends a resolved URL to the right place: the current tab (cmd+L) or a new
-  // tab (cmd+T, added to the active context group when one is set).
+  // tab (cmd+T, added to the active group when one is set).
   function dispatch(url: string) {
-    const groupId = contextGroupIdForDispatch();
+    const groupId = dispatchGroupId();
     close();
     if (opensInCurrentTab) {
       location.assign(url);
@@ -1386,7 +1377,7 @@ declare global {
     activeIndex = -1;
     if (host && host.parentNode) host.parentNode.removeChild(host);
     ghostSuffix = "";
-    host = overlay = stack = input = barEl = inputWrap = ghostEl = pillEl = cmdChipsEl = favRow = contextsRowEl = resultsEl = statusEl = null;
+    host = overlay = stack = input = barEl = inputWrap = ghostEl = pillEl = cmdChipsEl = favRow = groupsRowEl = resultsEl = statusEl = null;
   }
 
   function toggle(opts?: { opensInCurrentTab?: boolean; defaultUrl?: string }) {

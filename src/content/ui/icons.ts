@@ -1,4 +1,4 @@
-// Inline SVG path markup for the bar's leading icon (search) and its in-context
+// Inline SVG path markup for the bar's leading icon (search) and its in-group
 // variant (back arrow → temporarily exit to the default space).
 export const ICON_SEARCH =
   '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>';

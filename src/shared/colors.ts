@@ -43,7 +43,7 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } | nul
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
-// A very faint version of the context color for the bar background, layered over
+// A very faint version of the group color for the bar background, layered over
 // the bar's near-opaque surface so it stays readable in both modes.
 export function tintBg(hex: string): string {
   const dark = isDarkScheme();

@@ -64,9 +64,9 @@ export function mountBar() {
   const favRow = document.createElement("div");
   favRow.className = "faves";
 
-  const contextsRow = document.createElement("div");
-  contextsRow.className = "contexts-row";
-  contextsRow.style.display = "none";
+  const groupsRow = document.createElement("div");
+  groupsRow.className = "contexts-row";
+  groupsRow.style.display = "none";
 
   const results = document.createElement("div");
   results.className = "results";
@@ -78,7 +78,7 @@ export function mountBar() {
   bar.appendChild(icon);
   bar.appendChild(chips);
   bar.appendChild(inputWrap);
-  stack.appendChild(contextsRow);
+  stack.appendChild(groupsRow);
   stack.appendChild(bar);
   stack.appendChild(favRow);
   stack.appendChild(results);
@@ -90,6 +90,6 @@ export function mountBar() {
 
   return {
     host, shadow, overlay, stack, bar, icon, input, inputWrap, ghost, pill,
-    cmdChips, favRow, contextsRow, results, status,
+    cmdChips, favRow, groupsRow, results, status,
   };
 }
