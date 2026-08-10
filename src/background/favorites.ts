@@ -24,7 +24,10 @@ export function focusOrCreateTab(url: string, groupId?: number) {
         chrome.windows.update(match.windowId, { focused: true });
       }
     } else {
-      chrome.tabs.create({ url }, (tab) => addTabToGroup(tab, groupId));
+      chrome.tabs.create({ url }, (tab) => {
+        if (chrome.runtime.lastError) return; // navigation rejected
+        addTabToGroup(tab, groupId);
+      });
     }
   });
 }

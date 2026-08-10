@@ -3,7 +3,7 @@ import {
 } from "../shared/constants";
 import {
   normalizeUrl, buildUrl, applyShortcut, canon, hostPath,
-  looksLikeNavigable,
+  looksLikeNavigable, isSafeNavigationUrl,
 } from "../shared/url";
 import { MSG } from "../shared/messages";
 import {
@@ -822,15 +822,16 @@ declare global {
       // A typed base domain, explicit search, or a chosen history entry always
       // navigates to that exact URL (new tab, or current tab for cmd+L) — never
       // switch to some other open tab that merely shares the domain.
-      if (opensInCurrentTab) location.assign(r.url);
-      else
+      if (opensInCurrentTab) {
+        if (isSafeNavigationUrl(r.url)) location.assign(r.url);
+      } else
         chrome.runtime.sendMessage({
           type: MSG.SEARCH_SUBMIT,
           url: r.url,
           groupId: dispatchGroupId(),
         });
     } else if (opensInCurrentTab) {
-      location.assign(r.url); // cmd+L: replace the current page
+      if (isSafeNavigationUrl(r.url)) location.assign(r.url); // cmd+L: replace the current page
     } else {
       chrome.runtime.sendMessage({
         type: MSG.OPEN_FAVORITE,

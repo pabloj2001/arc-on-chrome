@@ -50,28 +50,48 @@ export function schemeFor(s: string): "http" | "https" {
   return host.includes(".") ? "https" : "http";
 }
 
+// Schemes that must never reach the tabs API: Chrome rejects javascript:/data:
+// navigations ("JavaScript URLs are not allowed…"), so we treat them as unsafe
+// and never build or open them from user input.
+const UNSAFE_SCHEME = /^(javascript|data|vbscript):/i;
+
+// True when a URL is safe to open via chrome.tabs.create/update.
+export function isSafeNavigationUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return !UNSAFE_SCHEME.test(url.trim());
+}
+
 // Builds a fully-encoded URL from raw input. Single-label hosts (go, localhost)
 // use http:// so corporate redirectors resolve; dotted/public hosts use https.
+// Returns null for unparseable input or an unsafe (javascript:/data:) scheme.
 export function normalizeUrl(u: string): string | null {
   const s = (u || "").trim();
   if (!s) return null;
+  if (UNSAFE_SCHEME.test(s)) return null;
   const full = HAS_SCHEME.test(s) ? s : `${schemeFor(s)}://${s}`;
   try {
-    return new URL(full).href;
+    const href = new URL(full).href;
+    return isSafeNavigationUrl(href) ? href : null;
   } catch (_) {
     return null;
   }
 }
 
 // Resolves user input to a URL that opens in a tab. A navigable host/path is
-// handed to the browser as a URL; otherwise it becomes a Google search.
+// handed to the browser as a URL; otherwise (or when it resolves to an unsafe
+// scheme) it becomes a Google search.
 export function buildUrl(query: string): string | null {
   const q = query.trim();
   if (!q) return null;
-  if (looksLikeNavigable(q)) return normalizeUrl(q);
-  const first = q.split(/\s+/)[0];
-  if (HAS_SCHEME.test(first) || INTRANET_PATH.test(first)) {
-    return normalizeUrl(q);
+  if (looksLikeNavigable(q)) {
+    const n = normalizeUrl(q);
+    if (n) return n;
+  } else {
+    const first = q.split(/\s+/)[0];
+    if (HAS_SCHEME.test(first) || INTRANET_PATH.test(first)) {
+      const n = normalizeUrl(q);
+      if (n) return n;
+    }
   }
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }

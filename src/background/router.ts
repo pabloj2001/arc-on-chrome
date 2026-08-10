@@ -1,6 +1,7 @@
 // Routes chrome.runtime messages from the content script to the right handler.
 // Returns true for handlers that reply asynchronously (keeps the channel open).
 import { MSG } from "../shared/messages";
+import { isSafeNavigationUrl } from "../shared/url";
 import { focusOrCreateTab } from "./favorites";
 import { getIndex } from "./index-builder";
 import {
@@ -11,14 +12,17 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
   if (!message) return;
   switch (message.type) {
     case MSG.SEARCH_SUBMIT:
-      if (message.url) {
+      if (message.url && isSafeNavigationUrl(message.url)) {
         chrome.tabs.create({ url: message.url }, (tab) => {
+          if (chrome.runtime.lastError) return; // navigation rejected
           addTabToGroup(tab, message.groupId);
         });
       }
       break;
     case MSG.OPEN_FAVORITE:
-      if (message.url) focusOrCreateTab(message.url, message.groupId);
+      if (message.url && isSafeNavigationUrl(message.url)) {
+        focusOrCreateTab(message.url, message.groupId);
+      }
       break;
     case MSG.ACTIVATE_TAB:
       if (message.tabId != null) {
