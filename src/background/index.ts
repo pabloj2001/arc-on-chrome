@@ -3,18 +3,17 @@
 // or message. Handler logic lives in the sibling modules.
 import { onCommand } from "./commands";
 import { onMessage } from "./router";
-import { onTabActivated, onAlarm, ensureAlarm, setContext } from "./contexts";
+import { onAlarm, ensureAlarm, createGroup } from "./groups";
 
 chrome.commands.onCommand.addListener(onCommand);
 chrome.runtime.onMessage.addListener(onMessage);
-chrome.tabs.onActivated.addListener(onTabActivated);
 chrome.alarms.onAlarm.addListener(onAlarm);
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.runtime.onInstalled.addListener(ensureAlarm);
 ensureAlarm();
 
 // Test bridge: before bundling, the worker's functions were top-level globals
-// that the Playwright harness referenced directly (e.g. `setContext`). esbuild's
+// that the Playwright harness referenced directly (e.g. `createGroup`). esbuild's
 // IIFE wrapper hides them, so re-expose the few the harness needs. Harmless in
 // production — just a function reference on the worker's global.
-(self as unknown as { setContext: typeof setContext }).setContext = setContext;
+(self as unknown as { createGroup: typeof createGroup }).createGroup = createGroup;

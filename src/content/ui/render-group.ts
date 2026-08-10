@@ -1,14 +1,14 @@
-// Tints the bar (border/icon/background) for the active context, or clears it.
-// The caller passes the *resolved* active context (null while temporarily
-// exited) and owns the status line.
+// Tints the bar (border/icon/background) for the active group, or clears it.
+// The caller passes the *resolved* active group (null while temporarily exited)
+// and owns the status line.
 import { groupHex, tintBg } from "../../shared/colors";
-import type { ContextInfo } from "./types";
+import type { GroupInfo } from "./types";
 
-interface Deps { bar: HTMLElement | null; icon: SVGElement | null; activeContext: ContextInfo | null; iconSearch: string; iconBack: string; }
-export function renderContext({ bar, icon, activeContext, iconSearch, iconBack }: Deps) {
+interface Deps { bar: HTMLElement | null; icon: SVGElement | null; activeGroup: GroupInfo | null; iconSearch: string; iconBack: string; }
+export function renderGroup({ bar, icon, activeGroup, iconSearch, iconBack }: Deps) {
   if (!bar) return;
-  if (activeContext) {
-    const hex = groupHex(activeContext.color);
+  if (activeGroup) {
+    const hex = groupHex(activeGroup.color);
     bar.style.setProperty("--ctx-color", hex);
     bar.style.background = tintBg(hex);
     if (icon) {

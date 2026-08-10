@@ -1,23 +1,22 @@
-// Numbered row of contexts above the bar: a "Default" chip (1) on the left, then
-// each tracked context, then a "+" chip (hidden at the limit). Clicks dispatch
-// via the onDefault/onSwitch/onAdd callbacks.
+// Numbered row of open groups above the bar: a "Default" chip (1) on the left,
+// then each open tab group, then a "+" chip. Clicks dispatch via the
+// onDefault/onSwitch/onAdd callbacks.
 import { groupHex, groupTextColor } from "../../shared/colors";
-import { MAX_CONTEXTS } from "../../shared/constants";
-import type { ContextInfo } from "./types";
+import type { GroupInfo } from "./types";
 
-interface Deps { el: HTMLElement | null; contexts: ContextInfo[]; activeContext: ContextInfo | null; onDefault: () => void; onSwitch: (groupId: number) => void; onAdd: () => void; }
-export function renderContextsRow({ el, contexts, activeContext, onDefault, onSwitch, onAdd }: Deps) {
+interface Deps { el: HTMLElement | null; groups: GroupInfo[]; activeGroup: GroupInfo | null; onDefault: () => void; onSwitch: (groupId: number) => void; onAdd: () => void; }
+export function renderGroupsRow({ el, groups, activeGroup, onDefault, onSwitch, onAdd }: Deps) {
   if (!el) return;
   el.textContent = "";
-  if (!contexts.length) {
+  if (!groups.length) {
     el.style.display = "none";
     return;
   }
   el.style.display = "flex";
 
-  // Default (no context) chip, number 1.
+  // Default (no group) chip, number 1.
   const def = document.createElement("button");
-  def.className = "ctx-chip ctx-default" + (!activeContext ? " active" : "");
+  def.className = "ctx-chip ctx-default" + (!activeGroup ? " active" : "");
   def.title = "Default space (Ctrl+1)";
   const dnum = document.createElement("span");
   dnum.className = "ctx-num";
@@ -30,12 +29,12 @@ export function renderContextsRow({ el, contexts, activeContext, onDefault, onSw
   def.addEventListener("click", onDefault);
   el.appendChild(def);
 
-  contexts.forEach((c: ContextInfo, i: number) => {
+  groups.forEach((c: GroupInfo, i: number) => {
     const hex = groupHex(c.color);
     const chip = document.createElement("button");
     chip.className =
       "ctx-chip" +
-      (activeContext && activeContext.groupId === c.groupId ? " active" : "");
+      (activeGroup && activeGroup.groupId === c.groupId ? " active" : "");
     chip.style.background = hex;
     chip.style.color = groupTextColor();
     chip.title = `Switch to "${c.name}" (Ctrl+${i + 2})`;
@@ -51,13 +50,11 @@ export function renderContextsRow({ el, contexts, activeContext, onDefault, onSw
     el.appendChild(chip);
   });
 
-  // "+" chip to create a new context (hidden at the 5-context limit).
-  if (contexts.length < MAX_CONTEXTS) {
-    const add = document.createElement("button");
-    add.className = "ctx-chip ctx-add";
-    add.title = "New context (Ctrl++)";
-    add.textContent = "+";
-    add.addEventListener("click", onAdd);
-    el.appendChild(add);
-  }
+  // "+" chip to create a new group from the current tab.
+  const add = document.createElement("button");
+  add.className = "ctx-chip ctx-add";
+  add.title = "New group (Ctrl++)";
+  add.textContent = "+";
+  add.addEventListener("click", onAdd);
+  el.appendChild(add);
 }

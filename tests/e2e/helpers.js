@@ -96,7 +96,7 @@ function readState(page) {
       invalid: p.classList.contains("invalid"),
       text: p.textContent,
     }));
-    const contextChips = [...sr.querySelectorAll(".ctx-chip")].map((c) => ({
+    const groupChips = [...sr.querySelectorAll(".ctx-chip")].map((c) => ({
       cls: c.className,
       num: c.querySelector(".ctx-num") ? c.querySelector(".ctx-num").textContent : "",
       name: c.querySelector(".ctx-cname") ? c.querySelector(".ctx-cname").textContent : "",
@@ -117,10 +117,10 @@ function readState(page) {
       ghostSuffix: ghostSuffix ? ghostSuffix.textContent : "",
       status: status ? status.textContent : "",
       pillText: pill && pill.style.display !== "none" ? pill.textContent : "",
-      hasContext: !!(bar && bar.classList.contains("has-context")),
+      hasGroup: !!(bar && bar.classList.contains("has-context")),
       results,
       paramPills,
-      contextChips,
+      groupChips,
       faves,
       activeIndex: results.findIndex((r) => r.active),
     };
@@ -158,12 +158,11 @@ async function getStorage(sw, keys) {
   );
 }
 
-// Create a context (tab group) from the current active tab, via the worker.
-async function createContext(sw, name, expiry) {
+// Create a group (tab group) from the current active tab, via the worker.
+async function createGroup(sw, name) {
   return sw.evaluate(
-    (args) =>
-      new Promise((r) => setContext({ tab: null }, args.name, args.expiry, r)),
-    { name, expiry: expiry || "" }
+    (n) => new Promise((r) => createGroup({ tab: null }, n, r)),
+    name
   );
 }
 
@@ -185,5 +184,5 @@ module.exports = {
   lastNewTabUrl,
   tabCount,
   getStorage,
-  createContext,
+  createGroup,
 };

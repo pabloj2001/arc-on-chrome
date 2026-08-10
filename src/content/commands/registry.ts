@@ -78,31 +78,27 @@ export const COMMANDS: Record<string, Command> = {
       ctx.importSettings(pasted || null);
     },
   },
-  context: {
+  group: {
     description:
-      "Group tabs into an expiring context. No name resets to default.",
-    params: [
-      { name: "name", optional: true },
-      { name: "expiry", optional: true },
-    ],
+      "Group the current tab into a Chrome tab group. No name clears the active group.",
+    params: [{ name: "name", optional: true }],
     run: (args: string[], ctx: CommandCtx) => {
       const name = (args[0] || "").trim();
-      const expiry = (args[1] || "").trim();
       if (!name) {
-        ctx.clearContext();
-        ctx.status("Context cleared — back to the default space");
+        ctx.clearGroup();
+        ctx.status("Group cleared — back to the default space");
         return;
       }
-      ctx.setContext(name, expiry); // status is set from the response
+      ctx.setGroup(name); // status is set from the response
     },
   },
-  deletecontext: {
-    description: "Delete a context: closes its tab group and stops tracking it.",
+  deletegroup: {
+    description: "Delete a group: closes its tabs (Chrome removes the empty group).",
     params: [{ name: "name" }],
     run: (args: string[], ctx: CommandCtx) => {
       const name = (args[0] || "").trim();
-      if (!name) return ctx.status(`Usage: ${usageOf("deletecontext")}`);
-      ctx.deleteContext(name);
+      if (!name) return ctx.status(`Usage: ${usageOf("deletegroup")}`);
+      ctx.deleteGroup(name);
     },
   },
 };

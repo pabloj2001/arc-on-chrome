@@ -1,11 +1,11 @@
 // Favorite/URL opening: focus a tab that already shows the target, else open it
-// (joining the active context group when one is given).
+// (joining the active group when one is given).
 import { parseUrl, tabMatchesFavorite } from "../shared/url";
-import { addTabToContext } from "./contexts";
+import { addTabToGroup } from "./groups";
 
 // If a tab already shows the favorite (exact URL preferred, else same-host
 // prefix), focus it (and its window); otherwise open the URL in a new tab
-// (added to the active context group when one is given).
+// (added to the active group when one is given).
 export function focusOrCreateTab(url: string, groupId?: number) {
   const fav = parseUrl(url);
   chrome.tabs.query({}, (tabs) => {
@@ -24,7 +24,7 @@ export function focusOrCreateTab(url: string, groupId?: number) {
         chrome.windows.update(match.windowId, { focused: true });
       }
     } else {
-      chrome.tabs.create({ url }, (tab) => addTabToContext(tab, groupId));
+      chrome.tabs.create({ url }, (tab) => addTabToGroup(tab, groupId));
     }
   });
 }

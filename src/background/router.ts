@@ -4,8 +4,8 @@ import { MSG } from "../shared/messages";
 import { focusOrCreateTab } from "./favorites";
 import { getIndex } from "./index-builder";
 import {
-  addTabToContext, setContext, clearActiveContext, switchContext, deleteContext,
-} from "./contexts";
+  addTabToGroup, createGroup, clearActiveGroup, switchGroup, deleteGroup,
+} from "./groups";
 
 export function onMessage(message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
   if (!message) return;
@@ -13,7 +13,7 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
     case MSG.SEARCH_SUBMIT:
       if (message.url) {
         chrome.tabs.create({ url: message.url }, (tab) => {
-          addTabToContext(tab, message.groupId);
+          addTabToGroup(tab, message.groupId);
         });
       }
       break;
@@ -28,17 +28,17 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
         }
       }
       break;
-    case MSG.SET_CONTEXT:
-      setContext(sender, message.name, message.expiry, sendResponse);
+    case MSG.SET_GROUP:
+      createGroup(sender, message.name, sendResponse);
       return true;
-    case MSG.CLEAR_CONTEXT:
-      clearActiveContext(sendResponse);
+    case MSG.CLEAR_GROUP:
+      clearActiveGroup(sendResponse);
       return true;
-    case MSG.SWITCH_CONTEXT:
-      switchContext(message.groupId, sendResponse);
+    case MSG.SWITCH_GROUP:
+      switchGroup(message.groupId, sendResponse);
       return true;
-    case MSG.DELETE_CONTEXT:
-      deleteContext(message.name, sendResponse);
+    case MSG.DELETE_GROUP:
+      deleteGroup(message.name, sendResponse);
       return true;
     case MSG.GET_INDEX:
       getIndex(sender, sendResponse);

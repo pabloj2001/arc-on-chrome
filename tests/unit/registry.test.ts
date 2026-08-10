@@ -4,7 +4,7 @@ import { COMMANDS, usageOf, bestCommandByPrefix } from "../../src/content/comman
 describe("usageOf", () => {
   it("wraps required params in <> and optional in []", () => {
     expect(usageOf("favorite")).toBe("/favorite <1-8> <url>");
-    expect(usageOf("context")).toBe("/context [name] [expiry]");
+    expect(usageOf("group")).toBe("/group [name]");
     expect(usageOf("export")).toBe("/export");
   });
 });
@@ -12,10 +12,10 @@ describe("usageOf", () => {
 describe("bestCommandByPrefix", () => {
   it("returns the shortest matching command name, excluding exact matches", () => {
     expect(bestCommandByPrefix("fav")).toBe("favorite");
-    expect(bestCommandByPrefix("con")).toBe("context");
+    expect(bestCommandByPrefix("gr")).toBe("group");
     expect(bestCommandByPrefix("zzz")).toBeNull();
-    // "context" is an exact match so it is excluded; deletecontext doesn't start with it
-    expect(bestCommandByPrefix("context")).toBeNull();
+    // "group" is an exact match so it is excluded; deletegroup doesn't start with it
+    expect(bestCommandByPrefix("group")).toBeNull();
   });
 });
 
