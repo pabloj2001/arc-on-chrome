@@ -3,8 +3,8 @@
 // This module also owns per-tab inactivity expiry — ungrouped tabs expire sooner
 // than grouped ones, and Chrome auto-removes a group once its last tab closes.
 import {
-  ACTIVE_GROUP_KEY, GROUP_ALARM, GROUP_COLORS,
-  UNGROUPED_EXPIRY_MS, GROUPED_EXPIRY_MS,
+  ACTIVE_GROUP_KEY, LAST_GROUP_KEY, GROUP_ALARM, GROUP_COLORS,
+  UNGROUPED_EXPIRY_MS, GROUPED_EXPIRY_MS, WEB_URL,
 } from "../shared/constants";
 import { getSettings } from "../shared/settings";
 
@@ -38,6 +38,21 @@ export function getActiveGroupId(): Promise<number | null> {
 export function setActiveGroupId(id: number | null): Promise<void> {
   return new Promise((resolve) =>
     chrome.storage.local.set({ [ACTIVE_GROUP_KEY]: id }, () => resolve())
+  );
+}
+
+// The last group the user actually worked in (focused a tab of, or created/
+// switched to via the bar). Externally-opened tabs adopt this group.
+export function getLastUsedGroupId(): Promise<number | null> {
+  return new Promise((resolve) =>
+    chrome.storage.local.get(LAST_GROUP_KEY, (r) =>
+      resolve(r[LAST_GROUP_KEY] != null ? (r[LAST_GROUP_KEY] as number) : null)
+    )
+  );
+}
+export function setLastUsedGroupId(id: number | null): Promise<void> {
+  return new Promise((resolve) =>
+    chrome.storage.local.set({ [LAST_GROUP_KEY]: id }, () => resolve())
   );
 }
 
@@ -93,6 +108,7 @@ export async function createGroup(
       }
       chrome.tabGroups.update(groupId, { title: cleanName, color });
       await setActiveGroupId(groupId);
+      await setLastUsedGroupId(groupId);
       ensureAlarm();
       sendResponse && sendResponse({ ok: true, groupId, name: cleanName, color });
     });
@@ -111,6 +127,7 @@ export async function switchGroup(groupId: number, sendResponse?: Responder) {
   const g = groups.find((x) => x.id === groupId);
   if (!g) return sendResponse && sendResponse({ ok: false });
   await setActiveGroupId(groupId);
+  await setLastUsedGroupId(groupId);
   sendResponse && sendResponse({ ok: true, activeGroup: toInfo(g) });
 }
 
@@ -132,6 +149,110 @@ export function addTabToGroup(tab: chrome.tabs.Tab | undefined, groupId: number 
   if (!tab || tab.id == null || groupId == null) return;
   chrome.tabs.group({ tabIds: [tab.id], groupId }, () => {
     void chrome.runtime.lastError; // group may have been deleted
+  });
+}
+
+// ---- Extension-created tab tracking ---------------------------------------
+// Tabs the extension itself opens (bar submit, favorite open) must be exempt
+// from the external-open auto-grouper below — the bar already decided their
+// group (or intentionally left them in the default space). onCreated fires
+// before chrome.tabs.create's callback runs, so we guard with BOTH a short time
+// window (covers that race) and an id set (covers the rest of the worker's life).
+const SELF_CREATED = new Set<number>();
+let selfCreateGuardUntil = 0;
+
+function markSelfCreated(id: number) {
+  SELF_CREATED.add(id);
+  setTimeout(() => SELF_CREATED.delete(id), 5000);
+}
+function isSelfCreated(id: number): boolean {
+  return SELF_CREATED.has(id) || Date.now() < selfCreateGuardUntil;
+}
+
+// Opens a tab the extension is responsible for, exempting it from the external-
+// open grouper and (optionally) placing it in `groupId`.
+export function openManagedTab(
+  createProps: chrome.tabs.CreateProperties,
+  groupId?: number
+) {
+  selfCreateGuardUntil = Date.now() + 1500;
+  chrome.tabs.create(createProps, (tab) => {
+    if (chrome.runtime.lastError || !tab || tab.id == null) return;
+    markSelfCreated(tab.id);
+    if (groupId != null) addTabToGroup(tab, groupId);
+  });
+}
+
+// ---- Last-used group + external-open grouping -----------------------------
+
+// Record the last group the user worked in whenever they focus a grouped tab.
+// (Ungrouped focus is ignored so the "last group" persists while you dip into
+// the default space — that's what an externally-opened tab should re-join.)
+export function onTabActivated({ tabId }: chrome.tabs.OnActivatedInfo) {
+  chrome.tabs.get(tabId, (tab) => {
+    if (chrome.runtime.lastError || !tab) return;
+    const gid = tab.groupId;
+    if (gid != null && gid !== TAB_GROUP_ID_NONE) void setLastUsedGroupId(gid);
+  });
+}
+
+// The subset of a created tab we inspect to classify it.
+export interface CreatedTabInfo {
+  id?: number;
+  openerTabId?: number;
+  active?: boolean;
+  groupId?: number;
+  url?: string;
+  pendingUrl?: string;
+}
+
+// Pure: is this newly-created tab an "external" open (from another app / the OS)
+// that should adopt the last-used group? External opens are focused, carry a
+// real web URL immediately, have NO opener (so in-page link clicks and
+// window.open — which Chrome already groups with their source — are excluded),
+// aren't already grouped, and weren't created by us.
+export function isExternalOpen(tab: CreatedTabInfo, selfCreated: boolean): boolean {
+  if (!tab || tab.id == null) return false;
+  if (selfCreated) return false;
+  if (tab.openerTabId != null) return false; // in-page link / window.open
+  if (!tab.active) return false; // external opens focus; excludes session restore
+  if (tab.groupId != null && tab.groupId !== TAB_GROUP_ID_NONE) return false;
+  const url = tab.pendingUrl || tab.url || "";
+  return WEB_URL.test(url);
+}
+
+// onCreated handler: move a detected external open into the last-used group (if
+// that group still exists). The onCreated payload often omits openerTabId (and
+// may lag the final URL), so we re-read the tab after a short tick before
+// classifying — otherwise in-page links (which get an opener slightly later)
+// would be misread as external.
+export function onTabCreated(tab: chrome.tabs.Tab) {
+  if (!tab || tab.id == null) return;
+  const id = tab.id;
+  if (isSelfCreated(id)) return; // fast path: our own bar/favorite tab
+  setTimeout(() => {
+    void adoptIfExternal(id);
+  }, 120);
+}
+
+async function adoptIfExternal(id: number): Promise<void> {
+  const tab = await new Promise<chrome.tabs.Tab | null>((resolve) =>
+    chrome.tabs.get(id, (t) => {
+      void chrome.runtime.lastError;
+      resolve(t || null);
+    })
+  );
+  if (!tab) return;
+  if (!isExternalOpen(tab as CreatedTabInfo, isSelfCreated(id))) return;
+  const gid = await getLastUsedGroupId();
+  if (gid == null) return;
+  const groups = await queryGroups();
+  if (!groups.some((g) => g.id === gid)) {
+    await setLastUsedGroupId(null); // stale — its tabs are gone
+    return;
+  }
+  chrome.tabs.group({ tabIds: [id], groupId: gid }, () => {
+    void chrome.runtime.lastError; // group may have vanished between checks
   });
 }
 

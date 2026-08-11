@@ -5,7 +5,7 @@ import { isSafeNavigationUrl } from "../shared/url";
 import { focusOrCreateTab } from "./favorites";
 import { getIndex } from "./index-builder";
 import {
-  addTabToGroup, createGroup, clearActiveGroup, switchGroup, deleteGroup,
+  openManagedTab, createGroup, clearActiveGroup, switchGroup, deleteGroup,
 } from "./groups";
 
 export function onMessage(message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
@@ -13,10 +13,9 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
   switch (message.type) {
     case MSG.SEARCH_SUBMIT:
       if (message.url && isSafeNavigationUrl(message.url)) {
-        chrome.tabs.create({ url: message.url }, (tab) => {
-          if (chrome.runtime.lastError) return; // navigation rejected
-          addTabToGroup(tab, message.groupId);
-        });
+        // Managed create: exempt from the external-open grouper and placed in
+        // the bar's chosen group (message.groupId), or the default space when none.
+        openManagedTab({ url: message.url }, message.groupId);
       }
       break;
     case MSG.OPEN_FAVORITE:

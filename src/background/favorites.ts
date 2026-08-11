@@ -1,7 +1,7 @@
 // Favorite/URL opening: focus a tab that already shows the target, else open it
 // (joining the active group when one is given).
 import { parseUrl, tabMatchesFavorite } from "../shared/url";
-import { addTabToGroup } from "./groups";
+import { openManagedTab } from "./groups";
 
 // If a tab already shows the favorite (exact URL preferred, else same-host
 // prefix), focus it (and its window); otherwise open the URL in a new tab
@@ -24,10 +24,9 @@ export function focusOrCreateTab(url: string, groupId?: number) {
         chrome.windows.update(match.windowId, { focused: true });
       }
     } else {
-      chrome.tabs.create({ url }, (tab) => {
-        if (chrome.runtime.lastError) return; // navigation rejected
-        addTabToGroup(tab, groupId);
-      });
+      // Managed create: exempt from the external-open grouper, placed in the
+      // bar's chosen group (or the default space when none).
+      openManagedTab({ url }, groupId);
     }
   });
 }

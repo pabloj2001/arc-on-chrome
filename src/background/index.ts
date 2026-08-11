@@ -3,11 +3,13 @@
 // or message. Handler logic lives in the sibling modules.
 import { onCommand } from "./commands";
 import { onMessage } from "./router";
-import { onAlarm, ensureAlarm, createGroup } from "./groups";
+import { onAlarm, ensureAlarm, createGroup, onTabCreated, onTabActivated } from "./groups";
 
 chrome.commands.onCommand.addListener(onCommand);
 chrome.runtime.onMessage.addListener(onMessage);
 chrome.alarms.onAlarm.addListener(onAlarm);
+chrome.tabs.onCreated.addListener(onTabCreated);
+chrome.tabs.onActivated.addListener(onTabActivated);
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.runtime.onInstalled.addListener(ensureAlarm);
 ensureAlarm();

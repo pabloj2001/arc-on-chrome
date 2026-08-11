@@ -67,3 +67,41 @@ describe("expiredTabIds", () => {
     expect(expiredTabIds([grouped, ungrouped], now, relaxed)).toEqual([]);
   });
 });
+
+import { isExternalOpen } from "../../src/background/groups";
+
+describe("isExternalOpen", () => {
+  const base = {
+    id: 42,
+    active: true,
+    groupId: -1,
+    pendingUrl: "https://example.com/",
+  };
+
+  it("accepts a focused, ungrouped, opener-less web tab we didn't create", () => {
+    expect(isExternalOpen(base, false)).toBe(true);
+    expect(isExternalOpen({ id: 1, active: true, groupId: -1, url: "http://x.com" }, false)).toBe(true);
+  });
+
+  it("rejects tabs the extension created itself", () => {
+    expect(isExternalOpen(base, true)).toBe(false);
+  });
+
+  it("rejects in-page links / window.open (they carry an openerTabId)", () => {
+    expect(isExternalOpen({ ...base, openerTabId: 7 }, false)).toBe(false);
+  });
+
+  it("rejects background (non-active) tabs — e.g. session restore", () => {
+    expect(isExternalOpen({ ...base, active: false }, false)).toBe(false);
+  });
+
+  it("rejects tabs already in a group", () => {
+    expect(isExternalOpen({ ...base, groupId: 5 }, false)).toBe(false);
+  });
+
+  it("rejects non-web tabs (new-tab page, extension pages)", () => {
+    expect(isExternalOpen({ ...base, pendingUrl: "", url: "edge://newtab/" }, false)).toBe(false);
+    expect(isExternalOpen({ ...base, pendingUrl: "about:blank", url: "" }, false)).toBe(false);
+    expect(isExternalOpen({ id: 1, active: true, groupId: -1 }, false)).toBe(false);
+  });
+});

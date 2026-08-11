@@ -61,6 +61,16 @@ open from the bar join it); if it's ungrouped, the bar opens in the default spac
 the URL shortcut (**Cmd+L**) too, since every open follows the current tab rather than a
 separately-remembered "active" group.
 
+### External links join your last-used group
+
+When you open a link from **another application** (Slack, Mail, a PDF…) the OS hands it to the
+browser, which normally drops it in a fresh tab at the end, outside every group. Instead, the
+extension moves that tab into the **last group you were working in** (the last grouped tab you
+focused, or the group you last created/switched to). Only genuine external opens are moved —
+tabs you open from the bar, new tabs (**Cmd/Ctrl+T**), and links clicked **within a page** keep
+their natural placement (an in-page link stays in its source tab's group, or ungrouped). If you
+don't want a link grouped, open it while your last-focused tab was ungrouped.
+
 ### Tab expiry
 
 Groups don't expire — **individual tabs** do, on inactivity, and Chrome removes a group once its
