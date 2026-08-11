@@ -105,3 +105,22 @@ describe("isExternalOpen", () => {
     expect(isExternalOpen({ id: 1, active: true, groupId: -1 }, false)).toBe(false);
   });
 });
+
+import { adoptTargetFor, ADOPT_WINDOW_MS } from "../../src/background/groups";
+
+describe("adoptTargetFor", () => {
+  const t = 1_000_000;
+  it("returns null with no hint", () => {
+    expect(adoptTargetFor(null, t)).toBeNull();
+  });
+  it("returns the hinted group when the hint is fresh", () => {
+    expect(adoptTargetFor({ groupId: 9, at: t }, t + 100)).toBe(9);
+    expect(adoptTargetFor({ groupId: 9, at: t }, t + ADOPT_WINDOW_MS - 1)).toBe(9);
+  });
+  it("returns null when the hint is stale (no recent focus-from-outside)", () => {
+    expect(adoptTargetFor({ groupId: 9, at: t }, t + ADOPT_WINDOW_MS + 1)).toBeNull();
+  });
+  it("returns null when the hinted context was the default space", () => {
+    expect(adoptTargetFor({ groupId: null, at: t }, t + 100)).toBeNull();
+  });
+});

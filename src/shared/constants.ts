@@ -5,7 +5,6 @@
 export const STORAGE_KEY = "arcFavorites";
 export const SHORTCUTS_KEY = "arcShortcuts";
 export const ACTIVE_GROUP_KEY = "arcActiveGroupId"; // groupId | null
-export const LAST_GROUP_KEY = "arcLastUsedGroupId"; // groupId | null — last group focused/used
 export const SETTINGS_KEY = "arcSettings"; // { groupedExpiryMs, ungroupedExpiryMs }
 
 // Tunables

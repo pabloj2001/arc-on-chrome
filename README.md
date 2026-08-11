@@ -61,15 +61,19 @@ open from the bar join it); if it's ungrouped, the bar opens in the default spac
 the URL shortcut (**Cmd+L**) too, since every open follows the current tab rather than a
 separately-remembered "active" group.
 
-### External links join your last-used group
+### External links join the group you're viewing
 
 When you open a link from **another application** (Slack, Mail, a PDF…) the OS hands it to the
 browser, which normally drops it in a fresh tab at the end, outside every group. Instead, the
-extension moves that tab into the **last group you were working in** (the last grouped tab you
-focused, or the group you last created/switched to). Only genuine external opens are moved —
-tabs you open from the bar, new tabs (**Cmd/Ctrl+T**), and links clicked **within a page** keep
-their natural placement (an in-page link stays in its source tab's group, or ungrouped). If you
-don't want a link grouped, open it while your last-focused tab was ungrouped.
+extension moves that tab into the group of **the tab you were viewing when the browser came
+forward** — so a link opened while you're working in a group lands in that group. If the tab you
+were on is **ungrouped**, the link stays in the default space (ungrouped) too.
+
+Only genuine external opens are moved. The trick is *window focus*: opening a link from another
+app makes the browser regain focus from the OS first, whereas **Cmd/Ctrl+T** (new tab) and
+**Cmd/Ctrl+Shift+T** (reopen closed tab) happen while the browser is already focused — those, plus
+tabs you open from the bar and links clicked **within a page** (they keep their source tab's
+group, or stay ungrouped), are left exactly where they are.
 
 ### Tab expiry
 
