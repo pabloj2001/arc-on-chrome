@@ -6,6 +6,7 @@ import {
   ACTIVE_GROUP_KEY, GROUP_ALARM, GROUP_COLORS,
   UNGROUPED_EXPIRY_MS, GROUPED_EXPIRY_MS,
 } from "../shared/constants";
+import { getSettings } from "../shared/settings";
 
 export type GroupColor = `${chrome.tabGroups.Color}`;
 
@@ -156,10 +157,23 @@ export interface ExpiryTab {
   lastAccessed?: number;
 }
 
+// Inactivity thresholds (ms) for grouped vs ungrouped tabs.
+export interface ExpiryThresholds {
+  groupedMs: number;
+  ungroupedMs: number;
+}
+
 // Pure: which tab ids should be closed for inactivity. A tab in a group expires
-// after 24h idle, an ungrouped tab after 2h. Never closes the active tab, a
-// pinned tab, a tab with unknown last-access, or the sole tab in its window.
-export function expiredTabIds(tabs: ExpiryTab[], now: number): number[] {
+// after `groupedMs` idle, an ungrouped tab after `ungroupedMs` (both default to
+// the built-in constants). Never closes the active tab, a pinned tab, a tab with
+// unknown last-access, or the sole tab in its window.
+export function expiredTabIds(
+  tabs: ExpiryTab[],
+  now: number,
+  thresholds?: ExpiryThresholds
+): number[] {
+  const groupedMs = thresholds ? thresholds.groupedMs : GROUPED_EXPIRY_MS;
+  const ungroupedMs = thresholds ? thresholds.ungroupedMs : UNGROUPED_EXPIRY_MS;
   const perWindow: Record<number, number> = {};
   for (const t of tabs) {
     const w = t.windowId ?? -1;
@@ -172,20 +186,27 @@ export function expiredTabIds(tabs: ExpiryTab[], now: number): number[] {
     const last = t.lastAccessed || 0;
     if (!last) continue; // unknown activity -> treat as fresh
     const grouped = t.groupId != null && t.groupId !== TAB_GROUP_ID_NONE;
-    const threshold = grouped ? GROUPED_EXPIRY_MS : UNGROUPED_EXPIRY_MS;
+    const threshold = grouped ? groupedMs : ungroupedMs;
     if (now - last > threshold) out.push(t.id);
   }
   return out;
 }
 
-// Every tick: close inactive tabs. Chrome auto-removes any group left empty; we
-// then reconcile a dangling active-group id against the surviving groups.
+// Every tick: close inactive tabs (using the user's configured thresholds).
+// Chrome auto-removes any group left empty; we then reconcile a dangling
+// active-group id against the surviving groups.
 export async function tickTabs() {
   const now = Date.now();
-  const tabs = await new Promise<chrome.tabs.Tab[]>((resolve) =>
-    chrome.tabs.query({}, (t) => resolve(t || []))
-  );
-  const ids = expiredTabIds(tabs as ExpiryTab[], now);
+  const [tabs, settings] = await Promise.all([
+    new Promise<chrome.tabs.Tab[]>((resolve) =>
+      chrome.tabs.query({}, (t) => resolve(t || []))
+    ),
+    getSettings(),
+  ]);
+  const ids = expiredTabIds(tabs as ExpiryTab[], now, {
+    groupedMs: settings.groupedExpiryMs,
+    ungroupedMs: settings.ungroupedExpiryMs,
+  });
   if (ids.length) await closeTabs(ids);
   // Drop the active group if it no longer exists (all its tabs expired).
   const activeId = await getActiveGroupId();

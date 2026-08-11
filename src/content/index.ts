@@ -7,6 +7,9 @@ import {
 } from "../shared/url";
 import { MSG } from "../shared/messages";
 import {
+  getSettings, setSettings, applySettingValue,
+} from "../shared/settings";
+import {
   normalizeFavArray, buildSettingsExport, parseSettingsImport,
 } from "./settings";
 import {
@@ -24,6 +27,7 @@ import { renderResults as renderResultsView } from "./ui/render-results";
 import { renderGroup as renderGroupView } from "./ui/render-group";
 import { renderGroupsRow as renderGroupsRowView } from "./ui/render-groups-row";
 import { renderCommandChips as renderCommandChipsView } from "./ui/render-command-chips";
+import { openSettingsModal } from "./ui/settings-modal";
 import type { Favorite, Shortcuts, TabItem, HistoryItem } from "../shared/types";
 import type { CommandCtx } from "./commands/types";
 import type { ResultRow, CommandState, GroupInfo } from "./ui/types";
@@ -287,6 +291,27 @@ declare global {
             loadIndex(); // refresh row + active group
           }
         );
+      },
+      openSettings: () => {
+        close(); // the /settings modal replaces the bar
+        getSettings().then((settings) => {
+          openSettingsModal({
+            settings,
+            onSave: (next) => {
+              void setSettings(next);
+            },
+          });
+        });
+      },
+      setSetting: (token: string, value: string) => {
+        getSettings().then((cur) => {
+          const res = applySettingValue(cur, token, value);
+          if (res.ok && res.settings) {
+            setSettings(res.settings).then(() => status(res.message || "Saved"));
+          } else {
+            status(res.error || "Couldn't update setting");
+          }
+        });
       },
       close,
       clearInput: () => {
@@ -1255,11 +1280,14 @@ declare global {
 
       // Enter command param mode when a full/prefix command name is followed by
       // a space (e.g. "/favorite " or "/fav " -> autocompletes to /favorite).
+      // Only for commands that declare params; a no-param command (e.g. /settings
+      // or /export) keeps the raw text so inline args like "/settings x y" reach
+      // runCommand on Enter instead of the command firing on the first space.
       if (!activeShortcut) {
         const cm = v.match(/^\/(\w+)\s([\s\S]*)$/);
         if (cm) {
           const name = COMMANDS[cm[1]] ? cm[1] : bestCommandByPrefix(cm[1]);
-          if (name) {
+          if (name && COMMANDS[name].params && COMMANDS[name].params.length) {
             enterCommandMode(name, cm[2], "/" + cm[1]);
             return;
           }

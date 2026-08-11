@@ -55,4 +55,15 @@ describe("expiredTabIds", () => {
     // window 1 has 2 tabs -> tab 1 expires; window 2 has only tab 3 -> protected
     expect(expiredTabIds([staleA, freshA, loneB], now)).toEqual([1]);
   });
+
+  it("honors custom thresholds from settings", () => {
+    // 10-minute grouped / 5-minute ungrouped windows
+    const thresholds = { groupedMs: 10 * 60000, ungroupedMs: 5 * 60000 };
+    const grouped = tab({ id: 1, groupId: 5, lastAccessed: now - 6 * 60000 }); // <10m -> survives
+    const ungrouped = tab({ id: 2, lastAccessed: now - 6 * 60000 }); // >5m -> expires
+    expect(expiredTabIds([grouped, ungrouped], now, thresholds)).toEqual([2]);
+    // With longer thresholds neither expires
+    const relaxed = { groupedMs: GROUPED_EXPIRY_MS, ungroupedMs: UNGROUPED_EXPIRY_MS };
+    expect(expiredTabIds([grouped, ungrouped], now, relaxed)).toEqual([]);
+  });
 });

@@ -5,6 +5,7 @@
 export const STORAGE_KEY = "arcFavorites";
 export const SHORTCUTS_KEY = "arcShortcuts";
 export const ACTIVE_GROUP_KEY = "arcActiveGroupId"; // groupId | null
+export const SETTINGS_KEY = "arcSettings"; // { groupedExpiryMs, ungroupedExpiryMs }
 
 // Tunables
 export const FAV_COUNT = 8;

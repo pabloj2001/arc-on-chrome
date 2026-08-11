@@ -18,6 +18,8 @@ export interface CommandCtx {
   setGroup: (name: string) => void;
   clearGroup: () => void;
   deleteGroup: (name: string) => void;
+  openSettings: () => void;
+  setSetting: (token: string, value: string) => void;
   close?: () => void;
   clearInput?: () => void;
 }

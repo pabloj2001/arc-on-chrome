@@ -66,14 +66,30 @@ separately-remembered "active" group.
 Groups don't expire — **individual tabs** do, on inactivity, and Chrome removes a group once its
 last tab is gone. A background alarm checks every minute:
 
-- a tab **not in a group** is closed after **2 hours** of inactivity;
-- a tab **in a group** is closed after **24 hours** of inactivity;
+- a tab **not in a group** is closed after **2 hours** of inactivity (configurable);
+- a tab **in a group** is closed after **24 hours** of inactivity (configurable);
 - a group whose tabs have all expired disappears automatically.
 
 The currently-active tab, pinned tabs, and the sole tab in a window are never auto-closed.
-"Inactivity" is measured from when a tab was last focused.
+"Inactivity" is measured from when a tab was last focused. Both windows are adjustable in
+**Settings** (see below).
 
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
+
+## Settings
+
+Run **`/settings`** to close the bar and open a settings modal, or set one directly without the
+modal via **`/settings <name> <value>`**. Durations accept `m` / `h` / `d` (e.g. `30m`, `24h`,
+`2d`); a bare number means minutes. Press **Escape** or click outside the modal to cancel; **Save**
+(or **Enter**) validates and persists.
+
+| Setting | `<name>` | Default | What it controls |
+| --- | --- | --- | --- |
+| Grouped tab expiry | `group-expiry` | `24h` | Inactivity before a tab **in a group** is closed |
+| Default tab expiry | `default-expiry` | `2h` | Inactivity before an **ungrouped** tab is closed |
+
+Examples: `/settings group-expiry 12h`, `/settings default-expiry 90m`. Settings are stored in
+`chrome.storage.local` and read by the background expiry check on its next tick.
 
 ## Keyword shortcuts (search-engine pills)
 
@@ -118,6 +134,7 @@ required parameters are empty they flash red instead.
 | `/deletegroup <name>` | Close a group's tabs (Chrome removes the empty group) |
 | `/export` | Copy all settings (favorites + shortcuts) to the clipboard as JSON |
 | `/import [json]` | Restore settings from the clipboard (or a file) exported via `/export` |
+| `/settings [name] [value]` | Open the settings modal, or set one directly (e.g. `/settings group-expiry 12h`) |
 
 Favorites and shortcuts are stored with `chrome.storage.local`, so they persist across browser
 restarts and stay in sync across tabs. The favicon buttons under the bar reflect your saved
@@ -144,7 +161,7 @@ const COMMANDS = {
     params: [{ name: "arg" }, { name: "other" }], // each shown as a pill
     run: (args, ctx) => {
       // args: the param values in order
-      // ctx: { status, setFavorite, setShortcut, removeShortcut, hasShortcut, exportSettings, importSettings, setGroup, clearGroup, deleteGroup, close, clearInput }
+      // ctx: { status, setFavorite, setShortcut, removeShortcut, hasShortcut, exportSettings, importSettings, setGroup, clearGroup, deleteGroup, openSettings, setSetting, close, clearInput }
       ctx.status("done");
     },
   },
@@ -228,7 +245,8 @@ The extension is written as modular TypeScript in `src/` and bundled by esbuild
 
 ```
 src/
-  shared/        # imported by BOTH bundles: url, colors, constants, messages
+  shared/        # imported by BOTH bundles: url, colors, constants, messages,
+                 #   settings (durable config: tab-expiry durations)
   background/    # service worker: index (listeners), commands, router,
                  #   index-builder, favorites, groups (tab-group mirror + tab expiry)
   content/       # the bar
@@ -237,7 +255,7 @@ src/
     search/      #   matching + ranking helpers
     keyboard/    #   key-combo predicates
     commands/    #   the slash-command registry
-    ui/          #   mount.ts (DOM refs), bar.css, icons, render-*.ts view modules
+    ui/          #   mount.ts (DOM refs), bar.css, icons, settings-modal, render-*.ts view modules
 ```
 
 Build/dev scripts: `npm run build` (minified prod), `npm run dev` (esbuild watch,

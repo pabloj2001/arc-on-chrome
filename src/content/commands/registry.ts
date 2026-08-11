@@ -78,6 +78,20 @@ export const COMMANDS: Record<string, Command> = {
       ctx.importSettings(pasted || null);
     },
   },
+  settings: {
+    description:
+      "Open the settings modal, or set one directly: /settings <name> <value>.",
+    params: [],
+    run: (args: string[], ctx: CommandCtx) => {
+      const token = (args[0] || "").trim();
+      if (!token) {
+        ctx.openSettings();
+        return;
+      }
+      const value = args.slice(1).join(" ").trim();
+      ctx.setSetting(token, value);
+    },
+  },
   group: {
     description:
       "Group the current tab into a Chrome tab group. No name clears the active group.",
