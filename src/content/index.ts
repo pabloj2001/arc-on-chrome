@@ -300,6 +300,15 @@ declare global {
             onSave: (next) => {
               void setSettings(next);
             },
+            shortcuts: { ...shortcuts },
+            onAddShortcut: (alias, url) => {
+              shortcuts[alias] = url;
+              void saveShortcuts();
+            },
+            onRemoveShortcut: (alias) => {
+              delete shortcuts[alias];
+              void saveShortcuts();
+            },
           });
         });
       },
@@ -313,6 +322,12 @@ declare global {
           }
         });
       },
+      listShortcuts: () => Object.keys(shortcuts).sort(),
+      listGroups: () => groupsList.map((g) => ({ name: g.name })),
+      listFavorites: () =>
+        favorites
+          .map((url, i) => ({ index: i + 1, url: url || "" }))
+          .filter((f) => !!f.url),
       close,
       clearInput: () => {
         if (input) input.value = "";
@@ -648,8 +663,36 @@ declare global {
   // No shortcut: empty query -> other open tabs; typing -> title/url matches in
   // open tabs then history. With a shortcut pill active: restrict to tabs/history
   // under the shortcut's destination URL (and further narrow by the typed query).
+
+  // While filling a command param, a command may offer value suggestions (e.g.
+  // /unshortcut lists aliases, /settings lists setting names). Filtered by what's
+  // typed into the active param; empty otherwise.
+  function computeSuggestions(): ResultRow[] {
+    if (!commandState) return [];
+    const cmd = COMMANDS[commandState.name];
+    if (!cmd || !cmd.suggest) return [];
+    const current = input ? input.value : "";
+    const list = cmd.suggest(commandState.index, current, commandCtx()) || [];
+    const q = current.trim().toLowerCase();
+    const filtered = q
+      ? list.filter(
+          (s) =>
+            s.value.toLowerCase().includes(q) ||
+            s.label.toLowerCase().includes(q)
+        )
+      : list;
+    return filtered.slice(0, MAX_RESULTS).map((s) => ({
+      type: "suggestion",
+      name: s.value,
+      title: s.label,
+      subtitle: s.description || "",
+      tag: s.tag,
+      run: s.run,
+    }));
+  }
+
   function computeResults(): ResultRow[] {
-    if (commandState) return [];
+    if (commandState) return computeSuggestions();
     const raw = input ? input.value : "";
 
     // Command palette: typing "/" lists matching commands.
@@ -798,9 +841,12 @@ declare global {
   }
 
   // Mirror the highlighted suggestion's URL into the bar (omnibox-style). When
-  // nothing is highlighted, restore the user's typed text and the ghost.
+  // nothing is highlighted, restore the user's typed text and the ghost. In
+  // command param mode the input belongs to the active param, so previewing does
+  // nothing (arrowing just moves the highlight; choosing fills the param).
   function previewSelection() {
     if (!input) return;
+    if (commandState) return;
     if (activeIndex < 0) {
       navigating = false;
       input.value = typedQuery;
@@ -829,6 +875,22 @@ declare global {
     if (r.type === "command") {
       // Remember the typed text (e.g. "/fav") to restore on backspace-out.
       enterCommandMode(r.name, "", input ? input.value : "");
+      return;
+    }
+    if (r.type === "suggestion") {
+      if (!commandState || !input) return;
+      // Fill the active param with the suggestion's value.
+      input.value = r.name || "";
+      commandState.values[commandState.index] = r.name || "";
+      const isLast = commandState.index >= commandState.params.length - 1;
+      if (r.run || isLast) {
+        runCommandStructured();
+      } else {
+        advanceParam();
+        activeIndex = -1;
+        refreshResults();
+        input.focus();
+      }
       return;
     }
     close();
@@ -985,13 +1047,30 @@ declare global {
       if (e.key === "Tab") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        advanceParam();
+        // Tab picks the highlighted suggestion (fills the param) if any, else
+        // advances to the next param.
+        if (activeIndex >= 0 && results[activeIndex]) chooseResult(activeIndex);
+        else advanceParam();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        moveSelection(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        moveSelection(-1);
         return;
       }
       if (e.key === "Enter") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        runCommandStructured();
+        // A highlighted suggestion wins; otherwise run with the typed values.
+        if (activeIndex >= 0 && results[activeIndex]) chooseResult(activeIndex);
+        else runCommandStructured();
         return;
       }
       if (e.key === "Escape") {
@@ -1269,9 +1348,13 @@ declare global {
 
     input.addEventListener("blur", onFocusOut);
     input.addEventListener("input", () => {
-      // Command param mode: keep the active-param pill sized to its content.
+      // Command param mode: keep the active-param pill sized to its content and
+      // refresh any value suggestions as the user types (no auto-highlight, so
+      // Enter still runs with the typed value unless a suggestion is chosen).
       if (commandState) {
         updateParamInputWidth();
+        activeIndex = -1;
+        refreshResults();
         return;
       }
       const v = input.value;

@@ -13,6 +13,16 @@ async function modalOpen(page) {
   return page.evaluate((id) => !!document.getElementById(id), MODAL_HOST);
 }
 
+// /settings enters param mode with value suggestions; the modal opens by
+// choosing the empty "Open settings…" option (Enter with no field typed).
+async function openModalViaCommand(page, sw) {
+  await h.openBarOn(page, sw);
+  await h.type(page, "/settings");
+  await h.press(page, "Enter"); // choose the command -> param mode + suggestions
+  await h.press(page, "Enter"); // empty setting -> open the modal
+  await h.sleep(200);
+}
+
 async function modalInputs(page) {
   return page.evaluate((id) => {
     const host = document.getElementById(id);
@@ -55,15 +65,25 @@ test.describe("settings (/settings command + modal)", () => {
     expect(s).toBeNull(); // never written
   });
 
+  test("/settings enters param mode with setting suggestions incl. an open-modal option", async ({ page, serviceWorker }) => {
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "/settings");
+    await h.press(page, "Enter"); // choose the command -> param mode
+    await h.sleep(120);
+    const st = await h.readState(page);
+    const sugg = st.results.filter((r) => r.type === "suggestion");
+    const titles = sugg.map((r) => r.title);
+    expect(titles).toContain("Open settings…");
+    expect(titles).toContain("group-expiry");
+    expect(titles).toContain("default-expiry");
+  });
+
   test("/settings (no args) closes the bar and opens the modal prefilled from storage", async ({ page, serviceWorker }) => {
     // seed a known value so the modal shows it
     await serviceWorker.evaluate(
       () => new Promise((r) => chrome.storage.local.set({ arcSettings: { groupedExpiryMs: 8 * 3600000, ungroupedExpiryMs: 2 * 3600000 } }, r))
     );
-    await h.openBarOn(page, serviceWorker);
-    await h.type(page, "/settings");
-    await h.press(page, "Enter");
-    await h.sleep(200);
+    await openModalViaCommand(page, serviceWorker);
     expect(await h.barExists(page)).toBe(false); // bar closed
     expect(await modalOpen(page)).toBe(true);
     const inputs = await modalInputs(page);
@@ -74,10 +94,7 @@ test.describe("settings (/settings command + modal)", () => {
   });
 
   test("editing a field in the modal and saving persists it; Escape closes", async ({ page, serviceWorker }) => {
-    await h.openBarOn(page, serviceWorker);
-    await h.type(page, "/settings");
-    await h.press(page, "Enter");
-    await h.sleep(200);
+    await openModalViaCommand(page, serviceWorker);
     expect(await modalOpen(page)).toBe(true);
     // set group-expiry to 3d and save
     await page.evaluate((id) => {
@@ -99,10 +116,7 @@ test.describe("settings (/settings command + modal)", () => {
   });
 
   test("an invalid modal value blocks save and shows an error", async ({ page, serviceWorker }) => {
-    await h.openBarOn(page, serviceWorker);
-    await h.type(page, "/settings");
-    await h.press(page, "Enter");
-    await h.sleep(200);
+    await openModalViaCommand(page, serviceWorker);
     await page.evaluate((id) => {
       const host = document.getElementById(id);
       const input = [...host.shadowRoot.querySelectorAll("input")].find(
@@ -121,4 +135,52 @@ test.describe("settings (/settings command + modal)", () => {
     const s = await readSettings(serviceWorker);
     expect(s).toBeNull(); // not persisted
   });
+
+  test("the modal has General + Shortcuts sections; shortcuts can be added and removed", async ({ page, serviceWorker }) => {
+    // seed one shortcut so the list isn't empty
+    await h.seedSettings(serviceWorker, { shortcuts: { go: "https://go/%s" } });
+    await openModalViaCommand(page, serviceWorker);
+    // sidebar shows both sections
+    const navs = await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      return [...host.shadowRoot.querySelectorAll(".nav-item")].map((n) => n.textContent);
+    }, MODAL_HOST);
+    expect(navs).toEqual(["General", "Shortcuts"]);
+    // switch to Shortcuts and read the list
+    await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      [...host.shadowRoot.querySelectorAll(".nav-item")].find((n) => n.textContent === "Shortcuts").click();
+    }, MODAL_HOST);
+    await h.sleep(100);
+    let aliases = await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      return [...host.shadowRoot.querySelectorAll(".sc-alias")].map((a) => a.textContent);
+    }, MODAL_HOST);
+    expect(aliases).toContain("go");
+    // add a new shortcut
+    await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      const sr = host.shadowRoot;
+      sr.querySelector(".sc-add-alias").value = "gh";
+      sr.querySelector(".sc-add-url").value = "https://github.com/search?q=%s";
+      sr.querySelector(".sc-add-btn").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }, MODAL_HOST);
+    await h.sleep(200);
+    let stored = await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.storage.local.get("arcShortcuts", (v) => r(v.arcShortcuts || {})))
+    );
+    expect(stored.gh).toBe("https://github.com/search?q=%s");
+    // remove the seeded "go" shortcut
+    await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      host.shadowRoot.querySelector('.sc-remove[data-alias="go"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }, MODAL_HOST);
+    await h.sleep(200);
+    stored = await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.storage.local.get("arcShortcuts", (v) => r(v.arcShortcuts || {})))
+    );
+    expect(stored.go).toBeUndefined();
+    expect(stored.gh).toBe("https://github.com/search?q=%s");
+  });
 });
+

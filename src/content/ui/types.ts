@@ -6,7 +6,7 @@ export type { GroupInfo };
 
 // A row in the results list.
 export interface ResultRow {
-  type: "tab" | "history" | "domain" | "search" | "command";
+  type: "tab" | "history" | "domain" | "search" | "command" | "suggestion";
   title?: string;
   url?: string;
   subtitle?: string;
@@ -14,7 +14,9 @@ export interface ResultRow {
   term?: string; // search rows: the raw typed term (kept in the bar on preview)
   tabId?: number;
   windowId?: number;
-  name?: string; // command name (type === "command")
+  name?: string; // command name (type === "command"); fill value (type === "suggestion")
+  tag?: string; // override tag label (suggestion rows)
+  run?: boolean; // suggestion rows: selecting runs the command immediately
 }
 
 // A single command param's live entry state.

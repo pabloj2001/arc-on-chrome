@@ -78,10 +78,17 @@ The bar disappears when you press **Escape**, click outside it, or switch tabs/w
 
 ## Settings
 
-Run **`/settings`** to close the bar and open a settings modal, or set one directly without the
-modal via **`/settings <name> <value>`**. Durations accept `m` / `h` / `d` (e.g. `30m`, `24h`,
-`2d`); a bare number means minutes. Press **Escape** or click outside the modal to cancel; **Save**
-(or **Enter**) validates and persists.
+Run **`/settings`** to open the settings modal, or set one directly without it via
+**`/settings <name> <value>`**. Typing `/settings` and choosing it shows **value suggestions** —
+each adjustable setting (with its description) plus an **"Open settings…"** option that launches
+the modal. Durations accept `m` / `h` / `d` (e.g. `30m`, `24h`, `2d`); a bare number means minutes.
+
+The modal has a left sidebar with two sections:
+
+- **General** — one field per setting; **Save** (or **Enter**) validates and persists, **Cancel**
+  / **Escape** / click-outside discards.
+- **Shortcuts** — lists every keyword shortcut with a **×** to remove it, plus an inline
+  *alias + URL* form to add a new one. Adds/removes apply immediately.
 
 | Setting | `<name>` | Default | What it controls |
 | --- | --- | --- | --- |
@@ -90,6 +97,14 @@ modal via **`/settings <name> <value>`**. Durations accept `m` / `h` / `d` (e.g.
 
 Examples: `/settings group-expiry 12h`, `/settings default-expiry 90m`. Settings are stored in
 `chrome.storage.local` and read by the background expiry check on its next tick.
+
+### Command argument suggestions
+
+Several commands suggest their argument values once selected: **`/settings`** lists the settings
+(and the open-modal option), **`/unshortcut`** lists your existing aliases, **`/deletegroup`**
+lists your open groups, and **`/unfavorite`** lists your set favorites. Suggestions filter as you
+type; **↑/↓** highlight, **Enter**/**Tab**/click chooses (running the command or filling the next
+param).
 
 ## Keyword shortcuts (search-engine pills)
 
