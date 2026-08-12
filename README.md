@@ -92,6 +92,11 @@ The currently-active tab, pinned tabs, and the sole tab in a window are never au
 "Inactivity" is measured from when a tab was last focused. Both windows are adjustable in
 **Settings** (see below).
 
+By default idle time accrues around the clock, but you can restrict it to **working hours** so a
+tab doesn't age overnight or on weekends: set `work-start` / `work-end` (e.g. `9:00`–`17:00`) and
+idle time only counts inside that window; toggle `include-weekends` off to skip Saturdays and
+Sundays. Leaving `work-start` equal to `work-end` (the default) counts all hours.
+
 The bar disappears when you press **Escape**, click outside it, or switch tabs/windows.
 
 ## Settings
@@ -112,9 +117,14 @@ The modal has a left sidebar with two sections:
 | --- | --- | --- | --- |
 | Grouped tab expiry | `group-expiry` | `24h` | Inactivity before a tab **in a group** is closed |
 | Default tab expiry | `default-expiry` | `2h` | Inactivity before an **ungrouped** tab is closed |
+| Working hours start | `work-start` | `00:00` | Idle time only accrues after this time (`==` end disables) |
+| Working hours end | `work-end` | `00:00` | Idle time only accrues before this time (`==` start disables) |
+| Count weekends | `include-weekends` | `on` | Whether Sat/Sun count toward tab expiry |
 
-Examples: `/settings group-expiry 12h`, `/settings default-expiry 90m`. Settings are stored in
-`chrome.storage.local` and read by the background expiry check on its next tick.
+Examples: `/settings group-expiry 12h`, `/settings default-expiry 90m`, `/settings work-start 9:00`,
+`/settings work-end 5pm`, `/settings include-weekends off`. Times accept 24h (`17:00`) or am/pm
+(`5pm`); toggles accept `on`/`off`. Settings are stored in `chrome.storage.local` and read by the
+background expiry check on its next tick.
 
 ### Command argument suggestions
 

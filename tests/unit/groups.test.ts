@@ -124,3 +124,29 @@ describe("adoptTargetFor", () => {
     expect(adoptTargetFor({ groupId: null, at: t }, t + 100)).toBeNull();
   });
 });
+
+describe("expiredTabIds with working hours", () => {
+  const HOUR = 3600000;
+  const work = { workStartMin: 540, workEndMin: 1020, includeWeekends: true }; // 9–17
+  // "now" = Monday 10:00; a tab last active Friday 16:00.
+  const now = new Date(2024, 0, 8, 10, 0, 0, 0).getTime(); // Mon
+  const friday16 = new Date(2024, 0, 5, 16, 0, 0, 0).getTime();
+
+  it("does not expire a tab whose idle time is mostly after-hours/weekend", () => {
+    const thresholds = { groupedMs: 24 * HOUR, ungroupedMs: 2 * HOUR };
+    const noWeekend = { ...work, includeWeekends: false };
+    // Working time Fri16->Mon10 (weekends excluded) = 2h, which is NOT > 2h ungrouped.
+    const t = tab({ id: 1, groupId: NONE, lastAccessed: friday16 });
+    const filler = tab({ id: 2, lastAccessed: now });
+    expect(expiredTabIds([t, filler], now, thresholds, noWeekend)).toEqual([]);
+  });
+
+  it("expires once enough working time has accrued", () => {
+    const thresholds = { groupedMs: 24 * HOUR, ungroupedMs: 1 * HOUR };
+    const noWeekend = { ...work, includeWeekends: false };
+    // 2h working time > 1h ungrouped threshold -> expires.
+    const t = tab({ id: 1, groupId: NONE, lastAccessed: friday16 });
+    const filler = tab({ id: 2, lastAccessed: now });
+    expect(expiredTabIds([t, filler], now, thresholds, noWeekend)).toEqual([1]);
+  });
+});

@@ -65,6 +65,23 @@ test.describe("settings (/settings command + modal)", () => {
     expect(s).toBeNull(); // never written
   });
 
+  test("/settings work-start / work-end set working hours; include-weekends toggles", async ({ page, serviceWorker }) => {
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "/settings work-start 9:00");
+    await h.press(page, "Enter");
+    await h.sleep(120);
+    await h.type(page, "/settings work-end 5pm");
+    await h.press(page, "Enter");
+    await h.sleep(120);
+    await h.type(page, "/settings include-weekends off");
+    await h.press(page, "Enter");
+    await h.sleep(150);
+    const s = await readSettings(serviceWorker);
+    expect(s.workStartMin).toBe(540);
+    expect(s.workEndMin).toBe(1020);
+    expect(s.includeWeekends).toBe(false);
+  });
+
   test("/settings enters param mode with setting suggestions incl. an open-modal option", async ({ page, serviceWorker }) => {
     await h.openBarOn(page, serviceWorker);
     await h.type(page, "/settings");
@@ -113,6 +130,37 @@ test.describe("settings (/settings command + modal)", () => {
     expect(await modalOpen(page)).toBe(false);
     const s = await readSettings(serviceWorker);
     expect(s.groupedExpiryMs).toBe(3 * 86400000);
+  });
+
+  test("the modal renders working-hours + weekend toggle and saves them", async ({ page, serviceWorker }) => {
+    await openModalViaCommand(page, serviceWorker);
+    // work-start/work-end are text inputs prefilled from the default (00:00)
+    const kinds = await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      const q = (tok) =>
+        [...host.shadowRoot.querySelectorAll("input")].find((i) => i.getAttribute("data-token") === tok);
+      return {
+        start: q("work-start").type,
+        end: q("work-end").type,
+        weekend: q("include-weekends").type,
+      };
+    }, MODAL_HOST);
+    expect(kinds).toEqual({ start: "text", end: "text", weekend: "checkbox" });
+    // set 9:00–17:00 and turn weekends off, then save
+    await page.evaluate((id) => {
+      const host = document.getElementById(id);
+      const sr = host.shadowRoot;
+      const q = (tok) => [...sr.querySelectorAll("input")].find((i) => i.getAttribute("data-token") === tok);
+      q("work-start").value = "9:00";
+      q("work-end").value = "17:00";
+      q("include-weekends").checked = false;
+      sr.querySelector(".btn.save").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }, MODAL_HOST);
+    await h.sleep(200);
+    const s = await readSettings(serviceWorker);
+    expect(s.workStartMin).toBe(540);
+    expect(s.workEndMin).toBe(1020);
+    expect(s.includeWeekends).toBe(false);
   });
 
   test("an invalid modal value blocks save and shows an error", async ({ page, serviceWorker }) => {

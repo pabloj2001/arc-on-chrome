@@ -6,7 +6,7 @@ import {
   ACTIVE_GROUP_KEY, GROUP_ALARM, GROUP_COLORS,
   UNGROUPED_EXPIRY_MS, GROUPED_EXPIRY_MS, WEB_URL,
 } from "../shared/constants";
-import { getSettings } from "../shared/settings";
+import { getSettings, workingElapsedMs, workHoursOf, type WorkHours } from "../shared/settings";
 
 export type GroupColor = `${chrome.tabGroups.Color}`;
 
@@ -311,16 +311,22 @@ export interface ExpiryThresholds {
 }
 
 // Pure: which tab ids should be closed for inactivity. A tab in a group expires
-// after `groupedMs` idle, an ungrouped tab after `ungroupedMs` (both default to
-// the built-in constants). Never closes the active tab, a pinned tab, a tab with
+// after `groupedMs` of *working-time* idle, an ungrouped tab after `ungroupedMs`
+// (both default to the built-in constants). Idle time is measured with
+// workingElapsedMs, so hours outside the configured working window (and excluded
+// weekends) don't count. Never closes the active tab, a pinned tab, a tab with
 // unknown last-access, or the sole tab in its window.
 export function expiredTabIds(
   tabs: ExpiryTab[],
   now: number,
-  thresholds?: ExpiryThresholds
+  thresholds?: ExpiryThresholds,
+  workHours?: WorkHours
 ): number[] {
   const groupedMs = thresholds ? thresholds.groupedMs : GROUPED_EXPIRY_MS;
   const ungroupedMs = thresholds ? thresholds.ungroupedMs : UNGROUPED_EXPIRY_MS;
+  // Default: whole-day, weekends counted -> working elapsed == wall-clock elapsed.
+  const wh: WorkHours =
+    workHours || { workStartMin: 0, workEndMin: 0, includeWeekends: true };
   const perWindow: Record<number, number> = {};
   for (const t of tabs) {
     const w = t.windowId ?? -1;
@@ -334,14 +340,14 @@ export function expiredTabIds(
     if (!last) continue; // unknown activity -> treat as fresh
     const grouped = t.groupId != null && t.groupId !== TAB_GROUP_ID_NONE;
     const threshold = grouped ? groupedMs : ungroupedMs;
-    if (now - last > threshold) out.push(t.id);
+    if (workingElapsedMs(last, now, wh) > threshold) out.push(t.id);
   }
   return out;
 }
 
-// Every tick: close inactive tabs (using the user's configured thresholds).
-// Chrome auto-removes any group left empty; we then reconcile a dangling
-// active-group id against the surviving groups.
+// Every tick: close inactive tabs (using the user's configured thresholds and
+// working hours). Chrome auto-removes any group left empty; we then reconcile a
+// dangling active-group id against the surviving groups.
 export async function tickTabs() {
   const now = Date.now();
   const [tabs, settings] = await Promise.all([
@@ -350,10 +356,12 @@ export async function tickTabs() {
     ),
     getSettings(),
   ]);
-  const ids = expiredTabIds(tabs as ExpiryTab[], now, {
-    groupedMs: settings.groupedExpiryMs,
-    ungroupedMs: settings.ungroupedExpiryMs,
-  });
+  const ids = expiredTabIds(
+    tabs as ExpiryTab[],
+    now,
+    { groupedMs: settings.groupedExpiryMs, ungroupedMs: settings.ungroupedExpiryMs },
+    workHoursOf(settings)
+  );
   if (ids.length) await closeTabs(ids);
   // Drop the active group if it no longer exists (all its tabs expired).
   const activeId = await getActiveGroupId();

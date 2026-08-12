@@ -51,6 +51,10 @@ const MODAL_CSS = `
 }
 .row input:focus { border-color: #4b6cff; box-shadow: 0 0 0 3px rgba(75,108,255,0.18); }
 .row.invalid input { border-color: #e3008c; box-shadow: 0 0 0 3px rgba(227,0,140,0.16); }
+.row-toggle { flex-direction: row; align-items: center; gap: 10px; }
+.row-toggle label { order: 2; }
+.row-toggle input { order: 1; width: 18px; height: 18px; flex: 0 0 auto; }
+.row-toggle .hint { order: 3; flex-basis: 100%; }
 .error { min-height: 18px; font-size: 13px; color: #e3008c; margin: -4px 0 10px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 12px; }
 .btn {
@@ -167,16 +171,21 @@ export function openSettingsModal(opts: {
 
   const rows = SETTING_DEFS.map((def) => {
     const row = document.createElement("div");
-    row.className = "row";
+    row.className = "row" + (def.kind === "toggle" ? " row-toggle" : "");
     const label = document.createElement("label");
     label.textContent = def.label;
     const input = document.createElement("input");
-    input.type = "text";
-    input.value = def.format(opts.settings[def.key]);
     input.setAttribute("data-token", def.token);
     input.autocapitalize = "off";
     input.autocomplete = "off";
     input.spellcheck = false;
+    if (def.kind === "toggle") {
+      input.type = "checkbox";
+      input.checked = opts.settings[def.key] === true;
+    } else {
+      input.type = "text";
+      input.value = def.format(opts.settings[def.key]);
+    }
     const hint = document.createElement("div");
     hint.className = "hint";
     hint.textContent = def.hint;
@@ -334,10 +343,14 @@ export function openSettingsModal(opts: {
 
   function saveGeneral() {
     error.textContent = "";
-    const next: Settings = { ...opts.settings };
+    const next = { ...opts.settings } as Record<string, number | boolean>;
     let firstBad: HTMLInputElement | null = null;
     for (const r of rows) {
       r.row.classList.remove("invalid");
+      if (r.def.kind === "toggle") {
+        next[r.def.key] = r.input.checked;
+        continue;
+      }
       const parsed = r.def.parse(r.input.value);
       if (parsed == null) {
         r.row.classList.add("invalid");
@@ -347,12 +360,12 @@ export function openSettingsModal(opts: {
       next[r.def.key] = parsed;
     }
     if (firstBad) {
-      error.textContent = "Enter a valid duration (e.g. 24h) for the highlighted field.";
+      error.textContent = "That value isn't valid — check the highlighted field.";
       firstBad.focus();
       firstBad.select();
       return;
     }
-    opts.onSave(next);
+    opts.onSave(next as unknown as Settings);
     close();
   }
 

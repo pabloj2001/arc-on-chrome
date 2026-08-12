@@ -9,11 +9,17 @@ import {
 export interface Settings {
   groupedExpiryMs: number;
   ungroupedExpiryMs: number;
+  workStartMin: number; // minutes from local midnight; == workEndMin => 24h (no limit)
+  workEndMin: number;
+  includeWeekends: boolean; // do Sat/Sun count toward tab expiry?
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   groupedExpiryMs: GROUPED_EXPIRY_MS,
   ungroupedExpiryMs: UNGROUPED_EXPIRY_MS,
+  workStartMin: 0,
+  workEndMin: 0, // 0 == 0 -> working hours span the whole day (no after-hours limit)
+  includeWeekends: true,
 };
 
 // ---- Duration parsing/formatting ------------------------------------------
@@ -46,17 +52,64 @@ export function formatDuration(ms: number): string {
   return Math.round(ms / MIN) + "m";
 }
 
+// ---- Time-of-day parsing/formatting ---------------------------------------
+
+// "9", "9:30", "09:30", "9am", "6pm", "18:00" -> minutes from midnight (0..1439),
+// or null. Bare hour is allowed; 12h am/pm and 24h both accepted.
+export function parseTimeOfDay(str: string): number | null {
+  const s = String(str || "").trim().toLowerCase();
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  const ap = m[3];
+  if (min > 59) return null;
+  if (ap) {
+    if (h < 1 || h > 12) return null;
+    if (ap === "am") h = h === 12 ? 0 : h;
+    else h = h === 12 ? 12 : h + 12;
+  } else if (h > 23) {
+    return null;
+  }
+  return h * 60 + min;
+}
+
+// Minutes from midnight -> "HH:MM" (24h).
+export function formatTimeOfDay(mins: number): string {
+  const m = ((mins % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+// ---- Toggle parsing/formatting --------------------------------------------
+
+export function parseToggle(str: string): boolean | null {
+  const s = String(str || "").trim().toLowerCase();
+  if (["on", "yes", "true", "1", "y", "enable", "enabled"].includes(s)) return true;
+  if (["off", "no", "false", "0", "n", "disable", "disabled"].includes(s)) return false;
+  return null;
+}
+export function formatToggle(v: boolean): string {
+  return v ? "on" : "off";
+}
+
 // ---- Setting registry ------------------------------------------------------
 
+export type SettingKind = "duration" | "time" | "toggle";
+export type SettingValue = number | boolean;
+
 // A single adjustable setting: how to name it (command token), label/hint it in
-// the modal, and convert between its stored value and the string the user types.
+// the modal, its input kind, and how to convert to/from the string the user types.
 export interface SettingDef {
   key: keyof Settings;
   token: string; // the /settings <token> name (no spaces)
   label: string; // modal row label
   hint: string; // placeholder / example
-  parse: (s: string) => number | null;
-  format: (v: number) => string;
+  kind: SettingKind;
+  parse: (s: string) => SettingValue | null;
+  format: (v: SettingValue) => string;
 }
 
 export const SETTING_DEFS: SettingDef[] = [
@@ -65,16 +118,45 @@ export const SETTING_DEFS: SettingDef[] = [
     token: "group-expiry",
     label: "Grouped tab expiry",
     hint: "e.g. 24h — inactivity before a tab in a group is closed",
+    kind: "duration",
     parse: parseDuration,
-    format: formatDuration,
+    format: (v) => formatDuration(v as number),
   },
   {
     key: "ungroupedExpiryMs",
     token: "default-expiry",
     label: "Default (ungrouped) tab expiry",
     hint: "e.g. 2h — inactivity before an ungrouped tab is closed",
+    kind: "duration",
     parse: parseDuration,
-    format: formatDuration,
+    format: (v) => formatDuration(v as number),
+  },
+  {
+    key: "workStartMin",
+    token: "work-start",
+    label: "Working hours start",
+    hint: "e.g. 9:00 — expiry pauses before this time (start == end disables)",
+    kind: "time",
+    parse: parseTimeOfDay,
+    format: (v) => formatTimeOfDay(v as number),
+  },
+  {
+    key: "workEndMin",
+    token: "work-end",
+    label: "Working hours end",
+    hint: "e.g. 17:00 — expiry pauses after this time (start == end disables)",
+    kind: "time",
+    parse: parseTimeOfDay,
+    format: (v) => formatTimeOfDay(v as number),
+  },
+  {
+    key: "includeWeekends",
+    token: "include-weekends",
+    label: "Count weekends",
+    hint: "on/off — whether Sat/Sun count toward tab expiry",
+    kind: "toggle",
+    parse: parseToggle,
+    format: (v) => formatToggle(v as boolean),
   },
 ];
 
@@ -84,16 +166,25 @@ export function findSettingDef(token: string): SettingDef | null {
   return SETTING_DEFS.find((d) => d.token === t) || null;
 }
 
-// Merges a raw stored object over the defaults, keeping only valid positive
-// numbers so a corrupt/partial blob can never disable expiry.
+// True if a raw value is valid for a setting's kind (durations must be positive;
+// times are 0..1439; toggles are booleans).
+function validValue(kind: SettingKind, v: unknown): boolean {
+  if (kind === "toggle") return typeof v === "boolean";
+  if (typeof v !== "number" || !isFinite(v)) return false;
+  if (kind === "duration") return v > 0;
+  return v >= 0 && v < 1440; // time
+}
+
+// Merges a raw stored object over the defaults, keeping only valid values so a
+// corrupt/partial blob can never disable expiry or store nonsense.
 export function mergeSettings(raw: unknown): Settings {
-  const out: Settings = { ...DEFAULT_SETTINGS };
+  const out = { ...DEFAULT_SETTINGS } as Record<string, SettingValue>;
   const src = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   for (const def of SETTING_DEFS) {
     const v = src[def.key];
-    if (typeof v === "number" && isFinite(v) && v > 0) out[def.key] = v;
+    if (validValue(def.kind, v)) out[def.key] = v as SettingValue;
   }
-  return out;
+  return out as unknown as Settings;
 }
 
 // Result of applying a `/settings` edit.
@@ -121,13 +212,74 @@ export function applySettingValue(
   if (parsed == null) {
     return { ok: false, error: `Invalid value for ${def.token} — ${def.hint}` };
   }
-  const next = { ...settings, [def.key]: parsed };
+  const next = { ...settings, [def.key]: parsed } as Settings;
   return {
     ok: true,
     settings: next,
     def,
     message: `${def.label} set to ${def.format(parsed)}`,
   };
+}
+
+// ---- Working-time expiry ---------------------------------------------------
+
+export interface WorkHours {
+  workStartMin: number;
+  workEndMin: number;
+  includeWeekends: boolean;
+}
+
+export function workHoursOf(s: Settings): WorkHours {
+  return {
+    workStartMin: s.workStartMin,
+    workEndMin: s.workEndMin,
+    includeWeekends: s.includeWeekends,
+  };
+}
+
+function isWeekend(d: Date): boolean {
+  const g = d.getDay(); // 0 = Sun, 6 = Sat (local)
+  return g === 0 || g === 6;
+}
+
+// The number of milliseconds between `from` and `to` that fall inside the
+// configured working hours (local time), skipping weekends when they're
+// excluded. When workStart == workEnd the whole day counts (no after-hours
+// limit). This is what tab-expiry accrues against, so idle time outside working
+// hours / on excluded weekends doesn't push a tab toward closing.
+export function workingElapsedMs(from: number, to: number, opts: WorkHours): number {
+  if (to <= from) return 0;
+  const allDay = opts.workStartMin === opts.workEndMin;
+  const startMs = opts.workStartMin * MIN;
+  const endMs = opts.workEndMin * MIN;
+
+  let total = 0;
+  const cur = new Date(from);
+  cur.setHours(0, 0, 0, 0); // local midnight of the day containing `from`
+  let dayStart = cur.getTime();
+  // Guard against pathological ranges (cap the walk at ~400 days).
+  for (let i = 0; dayStart < to && i < 400; i++) {
+    const nextMid = dayStart + DAY;
+    if (opts.includeWeekends || !isWeekend(new Date(dayStart))) {
+      const windows: [number, number][] = [];
+      if (allDay) {
+        windows.push([dayStart, nextMid]);
+      } else if (opts.workStartMin < opts.workEndMin) {
+        windows.push([dayStart + startMs, dayStart + endMs]);
+      } else {
+        // Overnight span (e.g. 22:00–06:00): night tail + early morning.
+        windows.push([dayStart + startMs, nextMid]);
+        windows.push([dayStart, dayStart + endMs]);
+      }
+      for (const [ws, we] of windows) {
+        const s = Math.max(ws, from);
+        const e = Math.min(we, to);
+        if (e > s) total += e - s;
+      }
+    }
+    dayStart = nextMid;
+  }
+  return total;
 }
 
 // ---- Storage ---------------------------------------------------------------
