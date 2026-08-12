@@ -27,7 +27,7 @@ A Chrome extension that replicates Arc's floating command/search bar.
   below).
 - **Slash commands** — type `/` followed by a command to run it (see below).
 - **Browse tabs & history** — under the bar, a result list shows your other open tabs. As you
-  type, it matches by title/URL across open tabs first, then your last 7 days of history.
+  type, it matches by title/URL across open tabs first, then your last 14 days of history.
   Use **↑/↓** or **Tab / Shift+Tab** to move the selection (which previews the highlighted
   result's URL in the bar), and **Enter** to go — switching to the tab if it's already open,
   otherwise opening the page. The list shows ~4 rows at a time (scroll for the rest, up to 10).

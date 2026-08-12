@@ -1,10 +1,10 @@
 // Builds the small index the bar searches: currently-open tabs plus the last
-// 7 days of history (capped). Only http(s) pages are included.
+// 14 days of history (capped). Only http(s) pages are included.
 import { WEB_URL } from "../shared/constants";
 import { getGroupState } from "./groups";
 
 export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const lookbackStart = Date.now() - 14 * 24 * 60 * 60 * 1000;
   chrome.tabs.query({}, (tabs) => {
     const openTabs = tabs
       .filter((t) => t.url && WEB_URL.test(t.url))
@@ -18,7 +18,7 @@ export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (re
       // Most recently used tabs first (lastAccessed is when a tab was last active).
       .sort((a, b) => b.lastAccessed - a.lastAccessed);
     chrome.history.search(
-      { text: "", startTime: weekAgo, maxResults: 500 },
+      { text: "", startTime: lookbackStart, maxResults: 500 },
       (items) => {
         const history = (items || [])
           .filter((h) => h.url && WEB_URL.test(h.url))
