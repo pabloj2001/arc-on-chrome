@@ -178,6 +178,7 @@ required parameters are empty they flash red instead.
 | `/export` | Copy all settings (favorites + shortcuts) to the clipboard as JSON |
 | `/import [json]` | Restore settings from the clipboard (or a file) exported via `/export` |
 | `/settings [name] [value]` | Open the settings modal, or set one directly (e.g. `/settings group-expiry 12h`) |
+| `/reload` | Reload the extension (applies a freshly built `dist/`) |
 
 Favorites and shortcuts are stored with `chrome.storage.local`, so they persist across browser
 restarts and stay in sync across tabs. The favicon buttons under the bar reflect your saved

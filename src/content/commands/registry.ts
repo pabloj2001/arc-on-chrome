@@ -135,6 +135,13 @@ export const COMMANDS: Record<string, Command> = {
       return [open, ...defs];
     },
   },
+  reload: {
+    description: "Reload the extension (applies a new build).",
+    params: [],
+    run: (args: string[], ctx: CommandCtx) => {
+      ctx.reload();
+    },
+  },
   group: {
     description:
       "Group the current tab into a Chrome tab group. No name clears the active group.",

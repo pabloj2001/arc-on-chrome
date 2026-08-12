@@ -322,6 +322,12 @@ declare global {
           }
         });
       },
+      reload: () => {
+        chrome.runtime.sendMessage({ type: MSG.RELOAD_EXTENSION }, () => {
+          void chrome.runtime.lastError; // the worker tears down as it reloads
+        });
+        close();
+      },
       listShortcuts: () => Object.keys(shortcuts).sort(),
       listGroups: () => groupsList.map((g) => ({ name: g.name })),
       listFavorites: () =>

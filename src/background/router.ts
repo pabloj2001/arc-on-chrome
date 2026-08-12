@@ -46,5 +46,8 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
     case MSG.GET_INDEX:
       getIndex(sender, sendResponse);
       return true; // keep the message channel open for the async response
+    case MSG.RELOAD_EXTENSION:
+      chrome.runtime.reload();
+      break;
   }
 }

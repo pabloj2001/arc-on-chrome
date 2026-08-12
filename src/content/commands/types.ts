@@ -41,6 +41,7 @@ export interface CommandCtx {
   deleteGroup: (name: string) => void;
   openSettings: () => void;
   setSetting: (token: string, value: string) => void;
+  reload: () => void;
   listShortcuts: () => string[];
   listGroups: () => GroupSuggestSource[];
   listFavorites: () => FavoriteSuggestSource[];

@@ -10,6 +10,7 @@ test.describe("command palette & param pills", () => {
     expect(s.results.every((r) => r.type === "command")).toBe(true);
     expect(names.join(" ")).toContain("/favorite");
     expect(names.join(" ")).toContain("/export");
+    expect(names.join(" ")).toContain("/reload");
   });
 
   test("selecting a command enters param mode with a pill per parameter", async ({ page, serviceWorker }) => {
