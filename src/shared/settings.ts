@@ -17,9 +17,9 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   groupedExpiryMs: GROUPED_EXPIRY_MS,
   ungroupedExpiryMs: UNGROUPED_EXPIRY_MS,
-  workStartMin: 0,
-  workEndMin: 0, // 0 == 0 -> working hours span the whole day (no after-hours limit)
-  includeWeekends: true,
+  workStartMin: 9 * 60, // 09:00
+  workEndMin: 18 * 60, // 18:00
+  includeWeekends: false,
 };
 
 // ---- Duration parsing/formatting ------------------------------------------
