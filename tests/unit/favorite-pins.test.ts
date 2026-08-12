@@ -14,7 +14,7 @@ describe("planFavoritePins", () => {
     const plan = planFavoritePins([A, null], []);
     expect(plan.create).toEqual([A]);
     expect(plan.pin).toEqual([]);
-    expect(plan.unpin).toEqual([]);
+    expect(plan.close).toEqual([]);
   });
 
   it("pins an existing (unpinned) tab that matches a favorite", () => {
@@ -27,23 +27,35 @@ describe("planFavoritePins", () => {
   it("keeps a favorite that is already pinned (no-op)", () => {
     const tabs = [tab({ id: 5, url: A, pinned: true })];
     const plan = planFavoritePins([A], tabs);
-    expect(plan).toEqual({ pin: [], unpin: [], create: [] });
+    expect(plan).toEqual({ pin: [], close: [], create: [] });
   });
 
-  it("unpins a pinned tab that is not a favorite", () => {
+  it("closes a pinned tab that is not a favorite", () => {
     const tabs = [tab({ id: 9, url: C, pinned: true })];
     const plan = planFavoritePins([A], tabs);
-    expect(plan.unpin).toEqual([9]);
+    expect(plan.close).toEqual([9]);
     expect(plan.create).toEqual([A]);
   });
 
-  it("unpins duplicate pins of the same favorite, keeping one", () => {
+  it("closes the pin of a removed favorite (no leftover tab)", () => {
+    // was [A, B], now just [A]; B's pinned tab should be closed.
+    const tabs = [
+      tab({ id: 1, url: A, pinned: true }),
+      tab({ id: 2, url: B, pinned: true }),
+    ];
+    const plan = planFavoritePins([A], tabs);
+    expect(plan.close).toEqual([2]);
+    expect(plan.pin).toEqual([]);
+    expect(plan.create).toEqual([]);
+  });
+
+  it("closes duplicate pins of the same favorite, keeping one", () => {
     const tabs = [
       tab({ id: 1, url: A, pinned: true }),
       tab({ id: 2, url: A, pinned: true }),
     ];
     const plan = planFavoritePins([A], tabs);
-    expect(plan.unpin).toEqual([2]);
+    expect(plan.close).toEqual([2]);
     expect(plan.pin).toEqual([]);
     expect(plan.create).toEqual([]);
   });
@@ -51,7 +63,7 @@ describe("planFavoritePins", () => {
   it("matches by canonical URL (ignores www / trailing slash / tracking)", () => {
     const tabs = [tab({ id: 5, url: "https://www.a.com", pinned: true })];
     const plan = planFavoritePins([A], tabs);
-    expect(plan).toEqual({ pin: [], unpin: [], create: [] });
+    expect(plan).toEqual({ pin: [], close: [], create: [] });
   });
 });
 

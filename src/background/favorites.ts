@@ -70,24 +70,27 @@ function desiredFavorites(favorites: Favorite[]): { canon: string; url: string }
 
 // Pure: the membership changes needed so the pinned tabs are exactly the set
 // favorites — pin an existing matching tab or create one for each favorite, and
-// unpin every other pinned tab (extras or non-favorites).
+// Pure: the changes needed so the pinned tabs are exactly the set favorites —
+// pin an existing matching tab or create one for each favorite, and CLOSE every
+// other pinned tab (extras or removed/non-favorites) so no leftover tabs pile up.
 export function planFavoritePins(
   favorites: Favorite[],
   tabs: PinTab[]
-): { pin: number[]; unpin: number[]; create: string[] } {
+): { pin: number[]; close: number[]; create: string[] } {
   const desired = desiredFavorites(favorites);
   const desiredSet = new Set(desired.map((d) => d.canon));
   const satisfied = new Set<string>();
   const pin: number[] = [];
-  const unpin: number[] = [];
+  const close: number[] = [];
   const create: string[] = [];
 
-  // Pass 1: keep one pinned tab per favorite, unpin the rest.
+  // Pass 1: keep one pinned tab per favorite; close the rest (a removed favorite,
+  // a duplicate, or a stray pin) so unpinned leftovers don't accumulate.
   for (const t of tabs) {
     if (!t.pinned || t.id == null) continue;
     const c = tabCanon(t);
     if (desiredSet.has(c) && !satisfied.has(c)) satisfied.add(c);
-    else unpin.push(t.id);
+    else close.push(t.id);
   }
   // Pass 2: pin an existing tab for each still-unsatisfied favorite, else open one.
   for (const d of desired) {
@@ -102,7 +105,7 @@ export function planFavoritePins(
     }
     satisfied.add(d.canon);
   }
-  return { pin, unpin, create };
+  return { pin, close, create };
 }
 
 // Pure: per-window tab moves that order the (favorite) pinned tabs by favorite
@@ -174,6 +177,15 @@ function createPinnedTab(url: string): Promise<void> {
   );
 }
 
+function removeTab(id: number): Promise<void> {
+  return new Promise((resolve) =>
+    chrome.tabs.remove(id, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    })
+  );
+}
+
 let syncing = false;
 let resyncQueued = false;
 
@@ -187,8 +199,25 @@ export async function syncFavoritePins(favorites: Favorite[]): Promise<void> {
   syncing = true;
   try {
     let tabs = (await queryAllTabs()) as PinTab[];
-    const { pin, unpin, create } = planFavoritePins(favorites, tabs);
-    for (const id of unpin) await updateTab(id, { pinned: false });
+    const { pin, close, create } = planFavoritePins(favorites, tabs);
+    // Tabs per window (snapshot) so we never close a window's only tab.
+    const perWindow: Record<number, number> = {};
+    for (const t of tabs) {
+      const w = t.windowId ?? -1;
+      perWindow[w] = (perWindow[w] || 0) + 1;
+    }
+    const byId = new Map(tabs.map((t) => [t.id, t] as const));
+    for (const id of close) {
+      const t = byId.get(id);
+      const w = t && t.windowId != null ? t.windowId : -1;
+      if ((perWindow[w] || 0) <= 1) {
+        // Closing would leave an empty window — just unpin instead.
+        await updateTab(id, { pinned: false });
+      } else {
+        await removeTab(id);
+        perWindow[w] -= 1;
+      }
+    }
     for (const id of pin) await updateTab(id, { pinned: true });
     for (const url of create) await createPinnedTab(url);
     // Re-read (created/pinned tabs now exist) and order the pinned strip.

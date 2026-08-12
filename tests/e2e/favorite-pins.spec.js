@@ -54,16 +54,29 @@ test.describe("favorites mirror to pinned tabs", () => {
     expect(pins.map((p) => p.url.replace(baseURL, ""))).toEqual(["/fav-b", "/fav-a"]);
   });
 
-  test("removing a favorite unpins its tab", async ({ serviceWorker, baseURL }) => {
+  test("removing a favorite closes its tab (no leftover)", async ({ serviceWorker, baseURL }) => {
     await h.seedSettings(serviceWorker, {
       favorites: [baseURL + "/fav-a", baseURL + "/fav-b", null, null, null, null, null, null],
     });
     await waitForPins(serviceWorker, ["/fav-a", "/fav-b"]);
+    const before = await h.tabCount(serviceWorker);
     await h.seedSettings(serviceWorker, {
       favorites: [baseURL + "/fav-a", null, null, null, null, null, null, null],
     });
     const pins = await waitForPins(serviceWorker, ["/fav-a"]);
     expect(pins.map((p) => p.url.replace(baseURL, ""))).toEqual(["/fav-a"]);
+    // the removed favorite's tab is gone entirely, not just unpinned
+    const stillOpen = await serviceWorker.evaluate(
+      (s) =>
+        new Promise((r) =>
+          chrome.tabs.query({}, (tabs) =>
+            r(tabs.some((t) => (t.url || t.pendingUrl || "").includes(s)))
+          )
+        ),
+      "/fav-b"
+    );
+    expect(stillOpen).toBe(false);
+    expect(await h.tabCount(serviceWorker)).toBe(before - 1);
   });
 
   test("an existing open tab is reused (pinned) rather than duplicated", async ({ context, serviceWorker, baseURL }) => {
@@ -85,7 +98,7 @@ test.describe("favorites mirror to pinned tabs", () => {
     await existing.close().catch(() => {});
   });
 
-  test("a non-favorite pinned tab is unpinned to match the favorites", async ({ context, serviceWorker, baseURL }) => {
+  test("a non-favorite pinned tab is closed to match the favorites", async ({ context, serviceWorker, baseURL }) => {
     const stray = await h.openTabAt(context, baseURL + "/stray");
     await serviceWorker.evaluate(
       (u) =>
@@ -97,20 +110,20 @@ test.describe("favorites mirror to pinned tabs", () => {
         ),
       baseURL
     );
-    // now set a favorite; the stray pin should be removed
+    // now set a favorite; the stray pin should be removed entirely
     await h.seedSettings(serviceWorker, {
       favorites: [baseURL + "/fav-a", null, null, null, null, null, null, null],
     });
     await waitForPins(serviceWorker, ["/fav-a"]);
-    const strayPinned = await serviceWorker.evaluate(
+    const strayOpen = await serviceWorker.evaluate(
       () =>
         new Promise((r) =>
-          chrome.tabs.query({ pinned: true }, (tabs) =>
+          chrome.tabs.query({}, (tabs) =>
             r(tabs.some((t) => (t.url || t.pendingUrl || "").includes("/stray")))
           )
         )
     );
-    expect(strayPinned).toBe(false);
+    expect(strayOpen).toBe(false);
     await stray.close().catch(() => {});
   });
 });
