@@ -5,6 +5,7 @@
 // matches the favorites exactly.
 import { STORAGE_KEY } from "../shared/constants";
 import { parseUrl, tabMatchesFavorite, canon } from "../shared/url";
+import { getSettings } from "../shared/settings";
 import { openManagedTab } from "./groups";
 
 // If a tab already shows the favorite (exact URL preferred, else same-host
@@ -233,12 +234,16 @@ export async function syncFavoritePins(favorites: Favorite[]): Promise<void> {
 }
 
 // storage.onChanged handler: any favorites change (add/update/remove/import)
-// re-syncs the pinned tabs.
+// re-syncs the pinned tabs — unless the pin-favorites setting is off, in which
+// case favorites don't touch pins at all.
 export function onFavoritesChanged(
   changes: { [key: string]: chrome.storage.StorageChange },
   area: string
 ) {
   if (area !== "local" || !changes[STORAGE_KEY]) return;
   const favs = changes[STORAGE_KEY].newValue;
-  void syncFavoritePins(Array.isArray(favs) ? (favs as Favorite[]) : []);
+  const list = Array.isArray(favs) ? (favs as Favorite[]) : [];
+  getSettings().then((s) => {
+    if (s.pinFavorites) void syncFavoritePins(list);
+  });
 }

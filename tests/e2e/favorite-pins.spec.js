@@ -126,4 +126,35 @@ test.describe("favorites mirror to pinned tabs", () => {
     expect(strayOpen).toBe(false);
     await stray.close().catch(() => {});
   });
+
+  test("with pin-favorites off: favorites don't create pins and open as a new tab", async ({ page, context, serviceWorker, baseURL }) => {
+    // disable pinning
+    await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.storage.local.set({ arcSettings: { pinFavorites: false } }, r))
+    );
+    // an existing open tab for the favorite URL
+    const existing = await h.openTabAt(context, baseURL + "/np");
+    await page.bringToFront();
+    await h.seedSettings(serviceWorker, {
+      favorites: [baseURL + "/np", null, null, null, null, null, null, null],
+    });
+    await h.sleep(500);
+    // no pinned tab was created
+    const anyPinned = await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.tabs.query({ pinned: true }, (t) => r(t.length)))
+    );
+    expect(anyPinned).toBe(0);
+    // clicking the favorite opens a NEW tab (doesn't reuse the existing one)
+    const beforeNp = await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.tabs.query({}, (t) => r(t.filter((x) => (x.url || x.pendingUrl || "").includes("/np")).length)))
+    );
+    await h.openBarOn(page, serviceWorker);
+    await page.locator(".fave").first().click();
+    await h.sleep(500);
+    const afterNp = await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.tabs.query({}, (t) => r(t.filter((x) => (x.url || x.pendingUrl || "").includes("/np")).length)))
+    );
+    expect(afterNp).toBe(beforeNp + 1); // opened a new tab
+    await existing.close().catch(() => {});
+  });
 });

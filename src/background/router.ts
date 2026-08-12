@@ -2,6 +2,7 @@
 // Returns true for handlers that reply asynchronously (keeps the channel open).
 import { MSG } from "../shared/messages";
 import { isSafeNavigationUrl } from "../shared/url";
+import { getSettings } from "../shared/settings";
 import { focusOrCreateTab } from "./favorites";
 import { getIndex } from "./index-builder";
 import {
@@ -20,7 +21,12 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
       break;
     case MSG.OPEN_FAVORITE:
       if (message.url && isSafeNavigationUrl(message.url)) {
-        focusOrCreateTab(message.url, message.groupId);
+        // With pinning on, favorites live as pinned tabs — focus the existing one
+        // (or open it). With pinning off, a favorite just opens as a new tab.
+        getSettings().then((s) => {
+          if (s.pinFavorites) focusOrCreateTab(message.url, message.groupId);
+          else openManagedTab({ url: message.url }, message.groupId);
+        });
       }
       break;
     case MSG.ACTIVATE_TAB:

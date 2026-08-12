@@ -12,6 +12,7 @@ export interface Settings {
   workStartMin: number; // minutes from local midnight; == workEndMin => 24h (no limit)
   workEndMin: number;
   includeWeekends: boolean; // do Sat/Sun count toward tab expiry?
+  pinFavorites: boolean; // mirror favorites onto pinned tabs?
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -20,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
   workStartMin: 9 * 60, // 09:00
   workEndMin: 18 * 60, // 18:00
   includeWeekends: false,
+  pinFavorites: true,
 };
 
 // ---- Duration parsing/formatting ------------------------------------------
@@ -148,6 +150,15 @@ export const SETTING_DEFS: SettingDef[] = [
     kind: "time",
     parse: parseTimeOfDay,
     format: (v) => formatTimeOfDay(v as number),
+  },
+  {
+    key: "pinFavorites",
+    token: "pin-favorites",
+    label: "Pin favorites as tabs",
+    hint: "on/off — keep each favorite open as a pinned tab",
+    kind: "toggle",
+    parse: parseToggle,
+    format: (v) => formatToggle(v as boolean),
   },
   {
     key: "includeWeekends",

@@ -150,3 +150,15 @@ describe("workingElapsedMs", () => {
     expect(workingElapsedMs(fri16, mon10, work)).toBe(18 * HOUR);
   });
 });
+
+import { SETTING_DEFS as DEFS2, DEFAULT_SETTINGS as DS2, mergeSettings as merge2 } from "../../src/shared/settings";
+
+describe("pin-favorites setting", () => {
+  it("is a toggle default-on", () => {
+    const def = DEFS2.find((d) => d.token === "pin-favorites");
+    expect(def && def.kind).toBe("toggle");
+    expect(DS2.pinFavorites).toBe(true);
+    expect(merge2({}).pinFavorites).toBe(true);
+    expect(merge2({ pinFavorites: false }).pinFavorites).toBe(false);
+  });
+});
