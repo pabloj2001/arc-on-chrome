@@ -17,7 +17,10 @@ A Chrome extension that replicates Arc's floating command/search bar.
   bar is open, or by clicking the favicon buttons shown under the bar. If the site is already
   open in a tab, it switches to that tab instead of opening a duplicate — matching by host and
   path prefix, so a bare-domain favorite (e.g. `gemini.google.com`) still matches the tab it
-  redirected to (`gemini.google.com/app`).
+  redirected to (`gemini.google.com/app`). Favorites are also **mirrored as pinned tabs**: each
+  set favorite is kept open as a pinned tab in favorite-slot order, and the pinned strip is
+  reconciled to match your favorites whenever you add, reorder, or remove one (any other pinned
+  tab is unpinned). Pinned favorite tabs are never auto-expired.
 - **Keyword shortcuts** — like custom search engines. Register an alias with a `%s` URL
   template, then type the alias + space to turn it into a **pill** and search through it (see
   below).

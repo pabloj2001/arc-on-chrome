@@ -3,6 +3,7 @@
 // or message. Handler logic lives in the sibling modules.
 import { onCommand } from "./commands";
 import { onMessage } from "./router";
+import { onFavoritesChanged } from "./favorites";
 import { onAlarm, ensureAlarm, createGroup, onTabCreated, onWindowFocusChanged } from "./groups";
 
 chrome.commands.onCommand.addListener(onCommand);
@@ -10,6 +11,7 @@ chrome.runtime.onMessage.addListener(onMessage);
 chrome.alarms.onAlarm.addListener(onAlarm);
 chrome.tabs.onCreated.addListener(onTabCreated);
 chrome.windows.onFocusChanged.addListener(onWindowFocusChanged);
+chrome.storage.onChanged.addListener(onFavoritesChanged);
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.runtime.onInstalled.addListener(ensureAlarm);
 ensureAlarm();
