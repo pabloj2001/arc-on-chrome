@@ -193,7 +193,7 @@ test.describe("settings (/settings command + modal)", () => {
       const host = document.getElementById(id);
       return [...host.shadowRoot.querySelectorAll(".nav-item")].map((n) => n.textContent);
     }, MODAL_HOST);
-    expect(navs).toEqual(["General", "Shortcuts"]);
+    expect(navs).toEqual(["General", "Expiry", "Shortcuts"]);
     // switch to Shortcuts and read the list
     await page.evaluate((id) => {
       const host = document.getElementById(id);

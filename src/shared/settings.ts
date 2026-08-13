@@ -100,19 +100,28 @@ export function formatToggle(v: boolean): string {
 // ---- Setting registry ------------------------------------------------------
 
 export type SettingKind = "duration" | "time" | "toggle";
+export type SettingCategory = "general" | "expiry";
 export type SettingValue = number | boolean;
 
 // A single adjustable setting: how to name it (command token), label/hint it in
-// the modal, its input kind, and how to convert to/from the string the user types.
+// the modal, its input kind + category, and how to convert to/from the string
+// the user types.
 export interface SettingDef {
   key: keyof Settings;
   token: string; // the /settings <token> name (no spaces)
   label: string; // modal row label
   hint: string; // placeholder / example
   kind: SettingKind;
+  category: SettingCategory; // which modal section it lives in
   parse: (s: string) => SettingValue | null;
   format: (v: SettingValue) => string;
 }
+
+// Modal section order + labels for the settings categories.
+export const SETTING_CATEGORIES: { id: SettingCategory; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "expiry", label: "Expiry" },
+];
 
 export const SETTING_DEFS: SettingDef[] = [
   {
@@ -121,6 +130,7 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Grouped tab expiry",
     hint: "e.g. 24h — inactivity before a tab in a group is closed",
     kind: "duration",
+    category: "expiry",
     parse: parseDuration,
     format: (v) => formatDuration(v as number),
   },
@@ -130,6 +140,7 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Default (ungrouped) tab expiry",
     hint: "e.g. 2h — inactivity before an ungrouped tab is closed",
     kind: "duration",
+    category: "expiry",
     parse: parseDuration,
     format: (v) => formatDuration(v as number),
   },
@@ -139,6 +150,7 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Working hours start",
     hint: "e.g. 9:00 — expiry pauses before this time (start == end disables)",
     kind: "time",
+    category: "expiry",
     parse: parseTimeOfDay,
     format: (v) => formatTimeOfDay(v as number),
   },
@@ -148,6 +160,7 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Working hours end",
     hint: "e.g. 17:00 — expiry pauses after this time (start == end disables)",
     kind: "time",
+    category: "expiry",
     parse: parseTimeOfDay,
     format: (v) => formatTimeOfDay(v as number),
   },
@@ -157,6 +170,7 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Pin favorites as tabs",
     hint: "on/off — keep each favorite open as a pinned tab",
     kind: "toggle",
+    category: "general",
     parse: parseToggle,
     format: (v) => formatToggle(v as boolean),
   },
@@ -166,6 +180,7 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Count weekends",
     hint: "on/off — whether Sat/Sun count toward tab expiry",
     kind: "toggle",
+    category: "expiry",
     parse: parseToggle,
     format: (v) => formatToggle(v as boolean),
   },

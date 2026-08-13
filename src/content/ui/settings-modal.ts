@@ -5,7 +5,7 @@
 //   • Shortcuts — list every keyword shortcut with a remove button, plus an
 //                 inline form to add a new one (applied immediately).
 // Esc or a backdrop click closes.
-import { SETTING_DEFS, type Settings } from "../../shared/settings";
+import { SETTING_DEFS, SETTING_CATEGORIES, type Settings } from "../../shared/settings";
 
 const MODAL_HOST_ID = "arc-settings-modal-host";
 
@@ -57,6 +57,8 @@ const MODAL_CSS = `
 .row-toggle .hint { order: 3; flex-basis: 100%; }
 .error { min-height: 18px; font-size: 13px; color: #e3008c; margin: -4px 0 10px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 12px; }
+.form-footer { display: flex; flex-direction: column; }
+.form-footer.hidden { display: none; }
 .btn {
   all: unset; box-sizing: border-box; cursor: pointer;
   height: 36px; padding: 0 16px; border-radius: 10px; font-size: 14px; font-weight: 600;
@@ -138,14 +140,15 @@ export function openSettingsModal(opts: {
   brand.textContent = "Settings";
   sidebar.appendChild(brand);
 
-  const sections = [
-    { id: "general", label: "General" },
+  const sections: { id: string; label: string }[] = [
+    ...SETTING_CATEGORIES.map((c) => ({ id: c.id, label: c.label })),
     { id: "shortcuts", label: "Shortcuts" },
   ];
+  const firstId = sections[0].id;
   const navButtons: Record<string, HTMLButtonElement> = {};
   for (const s of sections) {
     const btn = document.createElement("button");
-    btn.className = "nav-item" + (s.id === "general" ? " active" : "");
+    btn.className = "nav-item" + (s.id === firstId ? " active" : "");
     btn.textContent = s.label;
     btn.setAttribute("data-section", s.id);
     btn.addEventListener("click", () => selectSection(s.id));
@@ -157,49 +160,63 @@ export function openSettingsModal(opts: {
   const main = document.createElement("div");
   main.className = "main";
 
-  // General section.
-  const general = document.createElement("div");
-  general.className = "section active";
-  general.setAttribute("data-section", "general");
-  const gTitle = document.createElement("h3");
-  gTitle.textContent = "General";
-  const gLead = document.createElement("p");
-  gLead.className = "lead";
-  gLead.textContent = "Durations accept m / h / d (e.g. 30m, 24h, 2d). A bare number means minutes.";
-  general.appendChild(gTitle);
-  general.appendChild(gLead);
+  const CATEGORY_LEAD: Record<string, string> = {
+    general: "How favorites and the bar behave.",
+    expiry:
+      "Durations accept m / h / d (e.g. 30m, 24h, 2d); times accept 9:00 or 5pm.",
+  };
 
-  const rows = SETTING_DEFS.map((def) => {
-    const row = document.createElement("div");
-    row.className = "row" + (def.kind === "toggle" ? " row-toggle" : "");
-    const label = document.createElement("label");
-    label.textContent = def.label;
-    const input = document.createElement("input");
-    input.setAttribute("data-token", def.token);
-    input.autocapitalize = "off";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    if (def.kind === "toggle") {
-      input.type = "checkbox";
-      input.checked = opts.settings[def.key] === true;
-    } else {
-      input.type = "text";
-      input.value = def.format(opts.settings[def.key]);
+  // One section per settings category, each holding its own fields.
+  const categorySections: Record<string, HTMLDivElement> = {};
+  const rows: { def: (typeof SETTING_DEFS)[number]; row: HTMLDivElement; input: HTMLInputElement }[] = [];
+  for (const cat of SETTING_CATEGORIES) {
+    const section = document.createElement("div");
+    section.className = "section" + (cat.id === firstId ? " active" : "");
+    section.setAttribute("data-section", cat.id);
+    const title = document.createElement("h3");
+    title.textContent = cat.label;
+    const lead = document.createElement("p");
+    lead.className = "lead";
+    lead.textContent = CATEGORY_LEAD[cat.id] || "";
+    section.appendChild(title);
+    section.appendChild(lead);
+    for (const def of SETTING_DEFS.filter((d) => d.category === cat.id)) {
+      const row = document.createElement("div");
+      row.className = "row" + (def.kind === "toggle" ? " row-toggle" : "");
+      const label = document.createElement("label");
+      label.textContent = def.label;
+      const input = document.createElement("input");
+      input.setAttribute("data-token", def.token);
+      input.autocapitalize = "off";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      if (def.kind === "toggle") {
+        input.type = "checkbox";
+        input.checked = opts.settings[def.key] === true;
+      } else {
+        input.type = "text";
+        input.value = def.format(opts.settings[def.key]);
+      }
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = def.hint;
+      row.appendChild(label);
+      row.appendChild(input);
+      row.appendChild(hint);
+      section.appendChild(row);
+      rows.push({ def, row, input });
     }
-    const hint = document.createElement("div");
-    hint.className = "hint";
-    hint.textContent = def.hint;
-    row.appendChild(label);
-    row.appendChild(input);
-    row.appendChild(hint);
-    general.appendChild(row);
-    return { def, row, input };
-  });
+    categorySections[cat.id] = section;
+    main.appendChild(section);
+  }
 
+  // Shared settings footer (error + Save/Cancel), placed before the shortcuts
+  // section so `.error` / `.btn.save` resolve to the settings controls. Hidden
+  // while the Shortcuts section (which saves inline) is active.
+  const footer = document.createElement("div");
+  footer.className = "form-footer";
   const error = document.createElement("div");
   error.className = "error";
-  general.appendChild(error);
-
   const gActions = document.createElement("div");
   gActions.className = "actions";
   const cancelBtn = document.createElement("button");
@@ -210,7 +227,9 @@ export function openSettingsModal(opts: {
   saveBtn.textContent = "Save";
   gActions.appendChild(cancelBtn);
   gActions.appendChild(saveBtn);
-  general.appendChild(gActions);
+  footer.appendChild(error);
+  footer.appendChild(gActions);
+  main.appendChild(footer);
 
   // Shortcuts section.
   const scSection = document.createElement("div");
@@ -248,11 +267,10 @@ export function openSettingsModal(opts: {
   scAdd.appendChild(addUrl);
   scAdd.appendChild(addBtn);
   const scError = document.createElement("div");
-  scError.className = "error";
+  scError.className = "sc-error";
   scSection.appendChild(scAdd);
   scSection.appendChild(scError);
 
-  main.appendChild(general);
   main.appendChild(scSection);
 
   panel.appendChild(sidebar);
@@ -262,15 +280,16 @@ export function openSettingsModal(opts: {
   shadow.appendChild(backdrop);
   document.documentElement.appendChild(host);
 
-  let currentSection = "general";
+  let currentSection = firstId;
 
   function selectSection(id: string) {
     currentSection = id;
-    for (const s of sections) {
-      navButtons[s.id].classList.toggle("active", s.id === id);
+    for (const s of sections) navButtons[s.id].classList.toggle("active", s.id === id);
+    for (const cat of SETTING_CATEGORIES) {
+      categorySections[cat.id].classList.toggle("active", cat.id === id);
     }
-    general.classList.toggle("active", id === "general");
     scSection.classList.toggle("active", id === "shortcuts");
+    footer.classList.toggle("hidden", id === "shortcuts");
     error.textContent = "";
     scError.textContent = "";
   }
@@ -344,7 +363,7 @@ export function openSettingsModal(opts: {
   function saveGeneral() {
     error.textContent = "";
     const next = { ...opts.settings } as Record<string, number | boolean>;
-    let firstBad: HTMLInputElement | null = null;
+    let firstBad: { input: HTMLInputElement; category: string } | null = null;
     for (const r of rows) {
       r.row.classList.remove("invalid");
       if (r.def.kind === "toggle") {
@@ -354,15 +373,17 @@ export function openSettingsModal(opts: {
       const parsed = r.def.parse(r.input.value);
       if (parsed == null) {
         r.row.classList.add("invalid");
-        if (!firstBad) firstBad = r.input;
+        if (!firstBad) firstBad = { input: r.input, category: r.def.category };
         continue;
       }
       next[r.def.key] = parsed;
     }
     if (firstBad) {
+      // Reveal the offending field's section, then flag it.
+      if (currentSection !== firstBad.category) selectSection(firstBad.category);
       error.textContent = "That value isn't valid — check the highlighted field.";
-      firstBad.focus();
-      firstBad.select();
+      firstBad.input.focus();
+      firstBad.input.select();
       return;
     }
     opts.onSave(next as unknown as Settings);
@@ -377,8 +398,8 @@ export function openSettingsModal(opts: {
       close();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (currentSection === "general") saveGeneral();
-      else addShortcut();
+      if (currentSection === "shortcuts") addShortcut();
+      else saveGeneral();
     }
   }
 
@@ -391,9 +412,11 @@ export function openSettingsModal(opts: {
   document.addEventListener("keydown", onKeyDown, true);
 
   renderShortcuts();
-  if (rows.length) {
-    rows[0].input.focus();
-    rows[0].input.select();
+  // Focus the first field in the initially-active section.
+  const firstActive = rows.find((r) => r.def.category === firstId);
+  if (firstActive) {
+    firstActive.input.focus();
+    if (firstActive.input.type !== "checkbox") firstActive.input.select();
   }
 
   return { close };
