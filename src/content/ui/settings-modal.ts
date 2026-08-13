@@ -19,11 +19,11 @@ const MODAL_CSS = `
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 .panel {
-  width: 640px; max-width: calc(100vw - 32px); min-height: 340px;
+  width: 840px; max-width: calc(100vw - 32px); min-height: 360px;
   background: #fafafc; color: #1a1a1f;
   border-radius: 16px; overflow: hidden;
   box-shadow: 0 24px 64px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06);
-  display: grid; grid-template-columns: 176px 1fr;
+  display: grid; grid-template-columns: 200px 1fr;
 }
 .sidebar {
   background: #f0f0f3; padding: 20px 12px; border-right: 1px solid rgba(0,0,0,0.06);
@@ -86,7 +86,7 @@ const MODAL_CSS = `
   background: #fff; border: 1px solid #d9d9e0; color: #1a1a1f; font-size: 13px;
 }
 .sc-add input:focus { border-color: #4b6cff; box-shadow: 0 0 0 3px rgba(75,108,255,0.18); }
-.sc-add .sc-add-alias { width: 96px; }
+.sc-add .sc-add-alias { width: 120px; }
 .sc-add .sc-add-url { flex: 1; }
 @media (prefers-color-scheme: dark) {
   .panel { background: #1e1e21; color: #f2f2f4; box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06); }
