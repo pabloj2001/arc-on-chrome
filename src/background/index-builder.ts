@@ -18,7 +18,7 @@ export function getIndex(sender: chrome.runtime.MessageSender, sendResponse: (re
       // Most recently used tabs first (lastAccessed is when a tab was last active).
       .sort((a, b) => b.lastAccessed - a.lastAccessed);
     chrome.history.search(
-      { text: "", startTime: lookbackStart, maxResults: 500 },
+      { text: "", startTime: lookbackStart, maxResults: 1000 },
       (items) => {
         const history = (items || [])
           .filter((h) => h.url && WEB_URL.test(h.url))
