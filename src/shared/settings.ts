@@ -13,6 +13,8 @@ export interface Settings {
   workEndMin: number;
   includeWeekends: boolean; // do Sat/Sun count toward tab expiry?
   pinFavorites: boolean; // mirror favorites onto pinned tabs?
+  resetStaleFavorites: boolean; // reset a stale pinned favorite to its URL on open?
+  staleFavoriteMs: number; // idle time after which a pinned favorite counts as stale
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -22,6 +24,8 @@ export const DEFAULT_SETTINGS: Settings = {
   workEndMin: 18 * 60, // 18:00
   includeWeekends: false,
   pinFavorites: true,
+  resetStaleFavorites: true,
+  staleFavoriteMs: 4 * 60 * 60 * 1000, // 4h
 };
 
 // ---- Duration parsing/formatting ------------------------------------------
@@ -100,7 +104,7 @@ export function formatToggle(v: boolean): string {
 // ---- Setting registry ------------------------------------------------------
 
 export type SettingKind = "duration" | "time" | "toggle";
-export type SettingCategory = "general" | "expiry";
+export type SettingCategory = "general" | "favorites" | "expiry";
 export type SettingValue = number | boolean;
 
 // A single adjustable setting: how to name it (command token), label/hint it in
@@ -120,6 +124,7 @@ export interface SettingDef {
 // Modal section order + labels for the settings categories.
 export const SETTING_CATEGORIES: { id: SettingCategory; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "favorites", label: "Favorites" },
   { id: "expiry", label: "Expiry" },
 ];
 
@@ -170,9 +175,29 @@ export const SETTING_DEFS: SettingDef[] = [
     label: "Pin favorites as tabs",
     hint: "on/off — keep each favorite open as a pinned tab",
     kind: "toggle",
-    category: "general",
+    category: "favorites",
     parse: parseToggle,
     format: (v) => formatToggle(v as boolean),
+  },
+  {
+    key: "resetStaleFavorites",
+    token: "reset-stale-favorites",
+    label: "Reset stale favorites on open",
+    hint: "on/off — reload a favorite to its URL if idle past the threshold",
+    kind: "toggle",
+    category: "favorites",
+    parse: parseToggle,
+    format: (v) => formatToggle(v as boolean),
+  },
+  {
+    key: "staleFavoriteMs",
+    token: "stale-favorite-after",
+    label: "Stale favorite threshold",
+    hint: "e.g. 4h — idle time before a favorite is reset on open",
+    kind: "duration",
+    category: "favorites",
+    parse: parseDuration,
+    format: (v) => formatDuration(v as number),
   },
   {
     key: "includeWeekends",

@@ -1283,8 +1283,10 @@ declare global {
     }
     const groupId = dispatchGroupId();
     close();
-    // Switch to an existing tab with this URL if one is open, else new tab.
-    chrome.runtime.sendMessage({ type: MSG.OPEN_FAVORITE, url, groupId });
+    // With pinning on, favorites are pinned tabs aligned to the favorite slots,
+    // so just focus the Nth pinned tab (index i) — its URL may have drifted.
+    // Falls back to URL match/create when this window has no such pinned slot.
+    chrome.runtime.sendMessage({ type: MSG.OPEN_FAVORITE, url, groupId, index: i });
   }
 
   function renderFavorites() {

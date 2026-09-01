@@ -51,9 +51,14 @@ const MODAL_CSS = `
 }
 .row input:focus { border-color: #4b6cff; box-shadow: 0 0 0 3px rgba(75,108,255,0.18); }
 .row.invalid input { border-color: #e3008c; box-shadow: 0 0 0 3px rgba(227,0,140,0.16); }
-.row-toggle { flex-direction: row; align-items: center; gap: 10px; }
-.row-toggle label { order: 2; }
-.row-toggle input { order: 1; width: 18px; height: 18px; flex: 0 0 auto; }
+.row-toggle { flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row-toggle label { order: 2; white-space: nowrap; flex: 0 1 auto; }
+/* Checkboxes must keep their native rendering — the all:unset rule above strips
+   the appearance and leaves a blank, dead box, so restore it explicitly here. */
+.row-toggle input[type="checkbox"] {
+  all: revert; order: 1; width: 18px; height: 18px; flex: 0 0 auto;
+  margin: 0; cursor: pointer; accent-color: #4b6cff;
+}
 .row-toggle .hint { order: 3; flex-basis: 100%; }
 .error { min-height: 18px; font-size: 13px; color: #e3008c; margin: -4px 0 10px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 12px; }
@@ -161,7 +166,8 @@ export function openSettingsModal(opts: {
   main.className = "main";
 
   const CATEGORY_LEAD: Record<string, string> = {
-    general: "How favorites and the bar behave.",
+    general: "",
+    favorites: "How favorites open and stay in sync with pinned tabs.",
     expiry:
       "Durations accept m / h / d (e.g. 30m, 24h, 2d); times accept 9:00 or 5pm.",
   };

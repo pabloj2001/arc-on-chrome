@@ -14,15 +14,18 @@ A Chrome extension that replicates Arc's floating command/search bar.
   commands, autocomplete), except **Enter navigates the current tab** instead of opening a new
   one. (Internally the bar just takes `opensInCurrentTab` / `defaultUrl` options.)
 - **Favorites** — save up to 8 favorites and jump to them with **Cmd+1 … Cmd+8** while the
-  bar is open, or by clicking the favicon buttons shown under the bar. If the site is already
-  open in a tab, it switches to that tab instead of opening a duplicate — matching by host and
-  path prefix, so a bare-domain favorite (e.g. `gemini.google.com`) still matches the tab it
-  redirected to (`gemini.google.com/app`). With **pin-favorites** on (the default), favorites are
-  also **mirrored as pinned tabs**: each set favorite is kept open as a pinned tab in favorite-slot
-  order, and the pinned strip is reconciled to match your favorites whenever you add, reorder, or
-  remove one — a removed favorite's tab (and any other non-favorite pinned tab) is **closed**, not
-  left behind. Pinned favorite tabs are never auto-expired. Turn `pin-favorites` off (in Settings)
-  to leave pins alone entirely — then opening a favorite just opens it as a new tab.
+  bar is open, or by clicking the favicon buttons shown under the bar. With **pin-favorites** on
+  (the default), favorites are **mirrored as pinned tabs**: each set favorite is kept open as a
+  pinned tab in favorite-slot order, and the pinned strip is reconciled to match your favorites
+  whenever you add, reorder, or remove one — a removed favorite's tab (and any other non-favorite
+  pinned tab) is **closed**, not left behind. Because the pins stay aligned to the favorite slots,
+  **Cmd+1 … Cmd+8 jump straight to the Nth pinned tab by position** rather than matching by URL, so
+  a favorite whose page has since navigated elsewhere is still reachable. If **reset-stale-favorites**
+  is on (the default), a favorite tab that hasn't been used within the **stale-favorite-after**
+  threshold (default `4h`) is reloaded back to its original favorite URL before you switch to it.
+  Pinned favorite tabs are never auto-expired. Turn `pin-favorites` off (in Settings) to leave pins
+  alone entirely — then opening a favorite matches by host/path prefix (switching to an already-open
+  tab) or opens it as a new tab.
 - **Keyword shortcuts** — like custom search engines. Register an alias with a `%s` URL
   template, then type the alias + space to turn it into a **pill** and search through it (see
   below).
@@ -122,6 +125,8 @@ The modal has a left sidebar with two sections:
 | Working hours end | `work-end` | `18:00` | Idle time only accrues before this time (`==` start disables) |
 | Count weekends | `include-weekends` | `off` | Whether Sat/Sun count toward tab expiry |
 | Pin favorites | `pin-favorites` | `on` | Keep each favorite open as a pinned tab (off: favorites don't touch pins and open as a new tab) |
+| Reset stale favorites | `reset-stale-favorites` | `on` | Reload a favorite to its original URL if it's been idle past the threshold before switching to it |
+| Stale favorite threshold | `stale-favorite-after` | `4h` | How long a favorite tab can sit unused before it's treated as stale |
 
 Examples: `/settings group-expiry 12h`, `/settings default-expiry 90m`, `/settings work-start 9:00`,
 `/settings work-end 5pm`, `/settings include-weekends off`. Times accept 24h (`17:00`) or am/pm

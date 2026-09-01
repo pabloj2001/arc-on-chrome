@@ -36,6 +36,48 @@ export function focusOrCreateTab(url: string, groupId?: number) {
   });
 }
 
+// Focus the pinned tab at favorite slot `index` in the given window. Since pinned
+// tabs mirror the favorites in slot order, the Nth pinned tab IS favorite N — so
+// we jump to it by position regardless of whether its URL has since drifted. If
+// that window has no such pinned slot yet, fall back to URL match/create.
+//
+// When `stale` is enabled, a pinned favorite that hasn't been used within
+// `stale.staleMs` is reloaded at its original favorite `url` before we switch to
+// it (so a long-idle, possibly drifted favorite comes back fresh).
+export function focusFavoriteByIndex(
+  index: number,
+  url: string,
+  windowId?: number,
+  groupId?: number,
+  stale?: { enabled: boolean; staleMs: number }
+) {
+  chrome.tabs.query({ pinned: true }, (tabs) => {
+    void chrome.runtime.lastError;
+    const inWindow = (tabs || [])
+      .filter((t) => windowId == null || t.windowId === windowId)
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const target = inWindow[index];
+    if (target && target.id != null) {
+      const lastAccessed = (target as { lastAccessed?: number }).lastAccessed;
+      const isStale =
+        !!stale &&
+        stale.enabled &&
+        typeof lastAccessed === "number" &&
+        Date.now() - lastAccessed > stale.staleMs;
+      const props: chrome.tabs.UpdateProperties = { active: true };
+      // Stale favorite: reload it at the original favorite URL before showing it.
+      if (isStale) props.url = url;
+      chrome.tabs.update(target.id, props);
+      if (target.windowId != null) {
+        chrome.windows.update(target.windowId, { focused: true });
+      }
+      return;
+    }
+    // This window's pinned strip doesn't reach that slot — fall back.
+    focusOrCreateTab(url, groupId);
+  });
+}
+
 // ---- Favorite ↔ pinned-tab mirroring --------------------------------------
 
 // Minimal tab shape the pin planners reason about.

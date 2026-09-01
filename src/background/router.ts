@@ -3,7 +3,7 @@
 import { MSG } from "../shared/messages";
 import { isSafeNavigationUrl } from "../shared/url";
 import { getSettings } from "../shared/settings";
-import { focusOrCreateTab } from "./favorites";
+import { focusOrCreateTab, focusFavoriteByIndex } from "./favorites";
 import { getIndex } from "./index-builder";
 import {
   openManagedTab, createGroup, clearActiveGroup, switchGroup, deleteGroup,
@@ -21,11 +21,21 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
       break;
     case MSG.OPEN_FAVORITE:
       if (message.url && isSafeNavigationUrl(message.url)) {
-        // With pinning on, favorites live as pinned tabs — focus the existing one
-        // (or open it). With pinning off, a favorite just opens as a new tab.
+        // With pinning on, favorites live as pinned tabs aligned to the favorite
+        // slots — focus the Nth pinned tab by position (its URL may have drifted),
+        // falling back to URL match/create. With pinning off, open a new tab.
         getSettings().then((s) => {
-          if (s.pinFavorites) focusOrCreateTab(message.url, message.groupId);
-          else openManagedTab({ url: message.url }, message.groupId);
+          if (!s.pinFavorites) {
+            openManagedTab({ url: message.url }, message.groupId);
+          } else if (typeof message.index === "number") {
+            const winId = sender.tab ? sender.tab.windowId : undefined;
+            focusFavoriteByIndex(message.index, message.url, winId, message.groupId, {
+              enabled: s.resetStaleFavorites,
+              staleMs: s.staleFavoriteMs,
+            });
+          } else {
+            focusOrCreateTab(message.url, message.groupId);
+          }
         });
       }
       break;

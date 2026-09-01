@@ -162,3 +162,24 @@ describe("pin-favorites setting", () => {
     expect(merge2({ pinFavorites: false }).pinFavorites).toBe(false);
   });
 });
+
+describe("stale-favorite settings", () => {
+  it("reset-stale-favorites is a general toggle, default-on", () => {
+    const def = DEFS2.find((d) => d.token === "reset-stale-favorites");
+    expect(def && def.kind).toBe("toggle");
+    expect(def && def.category).toBe("favorites");
+    expect(DS2.resetStaleFavorites).toBe(true);
+    expect(merge2({}).resetStaleFavorites).toBe(true);
+    expect(merge2({ resetStaleFavorites: false }).resetStaleFavorites).toBe(false);
+  });
+
+  it("stale-favorite-after is a duration defaulting to 4h", () => {
+    const def = DEFS2.find((d) => d.token === "stale-favorite-after");
+    expect(def && def.kind).toBe("duration");
+    expect(def && def.category).toBe("favorites");
+    expect(DS2.staleFavoriteMs).toBe(4 * 60 * 60 * 1000);
+    // Invalid (non-positive) durations fall back to the default.
+    expect(merge2({ staleFavoriteMs: 0 }).staleFavoriteMs).toBe(4 * 60 * 60 * 1000);
+    expect(merge2({ staleFavoriteMs: 60_000 }).staleFavoriteMs).toBe(60_000);
+  });
+});
