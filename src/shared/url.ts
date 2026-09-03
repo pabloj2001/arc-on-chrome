@@ -111,6 +111,15 @@ export function applyShortcut(template: string, query: string): string {
   return ensureScheme(url);
 }
 
+// The origin ("https://host/") of a URL, ignoring a %s placeholder in the path
+// or query, for building a favicon URL. Null if the host can't be determined.
+export function originOf(u: string): string | null {
+  const hp = hostPath(u);
+  if (!hp || !hp.host) return null;
+  const scheme = /^http:\/\//i.test(u) ? "http" : "https";
+  return `${scheme}://${hp.host}/`;
+}
+
 // Chrome's favicon service URL for a page (needs the "favicon" permission).
 export function faviconUrl(pageUrl: string): string {
   return chrome.runtime.getURL(

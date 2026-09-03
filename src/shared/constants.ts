@@ -10,7 +10,7 @@ export const SETTINGS_KEY = "arcSettings"; // { groupedExpiryMs, ungroupedExpiry
 // Tunables
 export const FAV_COUNT = 8;
 export const MAX_RESULTS = 10;
-export const EXPORT_VERSION = 1;
+export const EXPORT_VERSION = 2;
 
 // DOM
 export const HOST_ID = "arc-search-bar-host";

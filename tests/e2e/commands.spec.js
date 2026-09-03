@@ -18,7 +18,7 @@ test.describe("command palette & param pills", () => {
     await h.type(page, "/shortcut");
     await h.press(page, "Enter"); // choose the highlighted command
     const s = await h.readState(page);
-    expect(s.paramPills.length).toBe(2); // alias + url
+    expect(s.paramPills.length).toBe(3); // alias + name + url
     expect(s.paramPills[0].active).toBe(true);
   });
 
@@ -66,6 +66,8 @@ test.describe("command palette & param pills", () => {
     await h.press(page, "Enter");
     await h.type(page, "gg");
     await h.press(page, "Tab");
+    await h.type(page, "Gigfigy");
+    await h.press(page, "Tab");
     await h.type(page, "https://gg.example/%s");
     await h.press(page, "Enter");
     const s = await h.readState(page);
@@ -73,7 +75,8 @@ test.describe("command palette & param pills", () => {
     expect(s.value).toBe("");
     expect(s.status.toLowerCase()).toContain("shortcut");
     const stored = await h.getStorage(serviceWorker, "arcShortcuts");
-    expect(stored.arcShortcuts.gg).toBe("https://gg.example/%s");
+    expect(stored.arcShortcuts.gg.url).toBe("https://gg.example/%s");
+    expect(stored.arcShortcuts.gg.name).toBe("Gigfigy");
   });
 
   test("Backspace on an empty first param backs out to the typed command text", async ({ page, serviceWorker }) => {

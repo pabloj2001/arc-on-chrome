@@ -143,15 +143,20 @@ param).
 
 ## Keyword shortcuts (search-engine pills)
 
-Register a shortcut, then type its alias at the start of the bar followed by a **space** — the
-alias becomes a pill and whatever you type next is substituted into the template's `%s`:
+Register a shortcut with an **alias** (the token you type to arm it), a **name** (a friendly
+label), and a URL template. Type the alias at the start of the bar followed by a **space** — a
+pill appears showing the shortcut's **site icon + name**, and whatever you type next is
+substituted into the template's `%s`:
 
 ```
-/shortcut go https://go/%s      then typing:  go hello   →  visits https://go/hello
-/shortcut yt https://www.youtube.com/results?search_query=%s
+/shortcut go GoLinks https://go/%s          then typing:  go hello  →  visits https://go/hello
+/shortcut yt YouTube https://www.youtube.com/results?search_query=%s
 ```
 
 - Press **space** after a registered alias to arm the pill; type your query and **Enter**.
+- The pill shows the **name** (not the alias) with the destination's **favicon** beside it.
+- Manage shortcuts in **Settings → Shortcuts**: add, **edit** (✎ — change the alias, name, or
+  URL), or remove (×). Adding a shortcut whose alias already exists is blocked.
 - While the pill is active, the result list shows your open tabs and history under the
   shortcut's destination (e.g. the `go` pill shows `https://go/*`), narrowing as you type.
   These are **collapsed by the value the shortcut's `%s` fills**, so the many near-identical
@@ -183,7 +188,7 @@ required parameters are empty they flash red instead.
 | --- | --- |
 | `/favorite <1-8> <url>` | Save a favorite, e.g. `/favorite 1 github.com` |
 | `/unfavorite <1-8>` | Clear a favorite |
-| `/shortcut <alias> <url with %s>` | Add a keyword shortcut, e.g. `/shortcut go https://go/%s` |
+| `/shortcut <alias> <name> <url with %s>` | Add a keyword shortcut, e.g. `/shortcut go GoLinks https://go/%s` |
 | `/unshortcut <alias>` | Remove a keyword shortcut |
 | `/group [name]` | Create a Chrome tab group from the current tab (no name returns to default) |
 | `/deletegroup <name>` | Close a group's tabs (Chrome removes the empty group) |

@@ -31,7 +31,7 @@ export interface FavoriteSuggestSource {
 export interface CommandCtx {
   status: (msg: string) => void;
   setFavorite: (i: number, url: Favorite) => void;
-  setShortcut: (alias: string, url: string) => void;
+  setShortcut: (alias: string, url: string, name: string) => void;
   removeShortcut: (alias: string) => void;
   hasShortcut: (alias: string) => boolean;
   exportSettings: () => void;

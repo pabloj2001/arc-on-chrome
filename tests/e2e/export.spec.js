@@ -18,21 +18,23 @@ test.describe("/export settings", () => {
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     const data = JSON.parse(clip);
     expect(data.type).toBe("arc-search-settings");
-    expect(data.version).toBe(1);
+    expect(data.version).toBe(2);
     expect(data.favorites[0]).toBe("https://github.com");
     expect(data.favorites[2]).toBe("https://news.ycombinator.com");
-    expect(data.shortcuts.gh).toBe("https://github.com/search?q=%s");
-    expect(data.shortcuts.yt).toBe("https://youtube.com/results?search_query=%s");
+    expect(data.shortcuts.gh.url).toBe("https://github.com/search?q=%s");
+    expect(data.shortcuts.yt.url).toBe("https://youtube.com/results?search_query=%s");
     // export is a no-op navigation and keeps the bar open
     expect(await h.barExists(page)).toBe(true);
   });
 
   test("export reflects live edits made via /favorite and /shortcut", async ({ page, serviceWorker }) => {
     await h.openBarOn(page, serviceWorker);
-    // add a shortcut through the command
+    // add a shortcut through the command (alias, name, url)
     await h.type(page, "/shortcut");
     await h.press(page, "Enter");
     await h.type(page, "go");
+    await h.press(page, "Tab");
+    await h.type(page, "GoLinks");
     await h.press(page, "Tab");
     await h.type(page, "https://go/%s");
     await h.press(page, "Enter");
@@ -43,7 +45,8 @@ test.describe("/export settings", () => {
     await h.sleep(300);
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     const data = JSON.parse(clip);
-    expect(data.shortcuts.go).toBe("https://go/%s");
+    expect(data.shortcuts.go.url).toBe("https://go/%s");
+    expect(data.shortcuts.go.name).toBe("GoLinks");
   });
 });
 
@@ -69,7 +72,8 @@ test.describe("/import settings", () => {
 
     const stored = await h.getStorage(serviceWorker, ["arcFavorites", "arcShortcuts"]);
     expect(stored.arcFavorites[0]).toBe("https://example.com");
-    expect(stored.arcShortcuts.dd).toBe("https://duckduckgo.com/?q=%s");
+    expect(stored.arcShortcuts.dd.url).toBe("https://duckduckgo.com/?q=%s");
+    expect(stored.arcShortcuts.dd.name).toBe("dd"); // legacy string -> name = alias
   });
 
   test("rejects invalid JSON without changing settings", async ({ page, serviceWorker }) => {

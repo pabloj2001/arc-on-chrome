@@ -112,6 +112,61 @@ test.describe("keyword shortcuts (pills)", () => {
     expect(s.results).toHaveLength(0);
   });
 
+  test("the pill shows the shortcut's name and a site icon", async ({ page, serviceWorker }) => {
+    await h.seedSettings(serviceWorker, {
+      shortcuts: { gh: { url: "https://github.com/search?q=%s", name: "GitHub" } },
+    });
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "gh ");
+    const pill = await page.evaluate((id) => {
+      const sr = document.getElementById(id).shadowRoot;
+      const label = sr.querySelector(".pill .pill-label");
+      const icon = sr.querySelector(".pill .pill-icon");
+      return {
+        label: label ? label.textContent : null,
+        iconSrc: icon ? icon.getAttribute("src") : null,
+      };
+    }, h.HOST);
+    expect(pill.label).toBe("GitHub"); // the name, not the alias "gh"
+    expect(pill.iconSrc).toContain("_favicon");
+    expect(pill.iconSrc).toContain("github.com");
+  });
+
+  test("editing a shortcut in the modal updates its name and url", async ({ page, serviceWorker }) => {
+    await h.seedSettings(serviceWorker, {
+      shortcuts: { gh: { url: "https://github.com/search?q=%s", name: "GitHub" } },
+    });
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "/settings");
+    await h.press(page, "Enter"); // choose the command -> param mode
+    await h.press(page, "Enter"); // empty setting -> open the modal
+    await h.sleep(200);
+    const MODAL = "arc-settings-modal-host";
+    // go to the Shortcuts section, start editing "gh"
+    await page.evaluate((id) => {
+      const sr = document.getElementById(id).shadowRoot;
+      [...sr.querySelectorAll(".nav-item")].find((n) => n.textContent === "Shortcuts").click();
+    }, MODAL);
+    await h.sleep(100);
+    await page.evaluate((id) => {
+      document.getElementById(id).shadowRoot.querySelector('.sc-edit[data-alias="gh"]').click();
+    }, MODAL);
+    await h.sleep(100);
+    // the form is prefilled; change name + url, then Save
+    await page.evaluate((id) => {
+      const sr = document.getElementById(id).shadowRoot;
+      sr.querySelector(".sc-add-name").value = "GitHub Code";
+      sr.querySelector(".sc-add-url").value = "https://github.com/search?q=%s&type=code";
+      sr.querySelector(".sc-add-btn").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }, MODAL);
+    await h.sleep(200);
+    const stored = await serviceWorker.evaluate(
+      () => new Promise((r) => chrome.storage.local.get("arcShortcuts", (v) => r(v.arcShortcuts || {})))
+    );
+    expect(stored.gh.name).toBe("GitHub Code");
+    expect(stored.gh.url).toBe("https://github.com/search?q=%s&type=code");
+  });
+
   test("clicking the pill removes it", async ({ page, serviceWorker }) => {
     await h.seedSettings(serviceWorker, { shortcuts: { gh: "https://github.com/search?q=%s" } });
     await h.openBarOn(page, serviceWorker);

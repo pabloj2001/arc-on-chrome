@@ -45,21 +45,22 @@ export const COMMANDS: Record<string, Command> = {
     },
   },
   shortcut: {
-    description: "Add a keyword search, e.g. /shortcut go https://go/%s",
-    params: [{ name: "alias" }, { name: "url with %s" }],
+    description: "Add a keyword search, e.g. /shortcut gh GitHub https://github.com/search?q=%s",
+    params: [{ name: "alias" }, { name: "name" }, { name: "url with %s" }],
     run: (args: string[], ctx: CommandCtx) => {
       const alias = (args[0] || "").trim().toLowerCase();
-      const url = args.slice(1).join(" ").trim();
+      const name = (args[1] || "").trim();
+      const url = args.slice(2).join(" ").trim();
       if (!alias || /\s/.test(alias)) {
         return ctx.status(`Usage: ${usageOf("shortcut")}`);
       }
       if (!url) {
         return ctx.status(
-          `Provide a URL, e.g. /shortcut ${alias} https://example.com/search?q=%s`
+          `Provide a URL, e.g. /shortcut ${alias} ${name || "Name"} https://example.com/search?q=%s`
         );
       }
-      ctx.setShortcut(alias, url);
-      ctx.status(`Shortcut "${alias}" → ${url}`);
+      ctx.setShortcut(alias, url, name || alias);
+      ctx.status(`Shortcut "${alias}" (${name || alias}) → ${url}`);
     },
   },
   unshortcut: {

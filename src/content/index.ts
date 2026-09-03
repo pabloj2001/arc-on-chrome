@@ -3,12 +3,13 @@ import {
 } from "../shared/constants";
 import {
   normalizeUrl, buildUrl, applyShortcut, canon, hostPath, shortcutDedupKey,
-  looksLikeNavigable, isSafeNavigationUrl,
+  looksLikeNavigable, isSafeNavigationUrl, faviconUrl, originOf,
 } from "../shared/url";
 import { MSG } from "../shared/messages";
 import {
   getSettings, setSettings, applySettingValue,
 } from "../shared/settings";
+import { normalizeShortcuts } from "../shared/shortcuts";
 import {
   normalizeFavArray, buildSettingsExport, parseSettingsImport,
 } from "./settings";
@@ -92,7 +93,7 @@ declare global {
       favorites = normalizeFavArray(res[STORAGE_KEY]);
     }
     if (res && res[SHORTCUTS_KEY] && typeof res[SHORTCUTS_KEY] === "object") {
-      shortcuts = res[SHORTCUTS_KEY] as Shortcuts;
+      shortcuts = normalizeShortcuts(res[SHORTCUTS_KEY]);
     }
     if (isOpen) renderFavorites();
   });
@@ -105,7 +106,7 @@ declare global {
       if (isOpen) renderFavorites();
     }
     if (changes[SHORTCUTS_KEY]) {
-      shortcuts = (changes[SHORTCUTS_KEY].newValue || {}) as Shortcuts;
+      shortcuts = normalizeShortcuts(changes[SHORTCUTS_KEY].newValue || {});
     }
   });
 
@@ -189,8 +190,8 @@ declare global {
         saveFavorites();
         renderFavorites();
       },
-      setShortcut: (alias: string, url: string) => {
-        shortcuts[alias] = url;
+      setShortcut: (alias: string, url: string, name: string) => {
+        shortcuts[alias] = { url, name: name || alias };
         saveShortcuts();
       },
       removeShortcut: (alias: string) => {
@@ -301,8 +302,9 @@ declare global {
               void setSettings(next);
             },
             shortcuts: { ...shortcuts },
-            onAddShortcut: (alias, url) => {
-              shortcuts[alias] = url;
+            onSaveShortcut: (alias, shortcut, prevAlias) => {
+              if (prevAlias && prevAlias !== alias) delete shortcuts[prevAlias];
+              shortcuts[alias] = shortcut;
               void saveShortcuts();
             },
             onRemoveShortcut: (alias) => {
@@ -554,10 +556,13 @@ declare global {
   // ---- Shortcut pill ---------------------------------------------------------
 
   function renderPill() {
+    const sc = activeShortcut ? shortcuts[activeShortcut] : null;
     renderPillView({
       pill: pillEl,
       input,
       activeShortcut,
+      shortcutName: sc ? sc.name : null,
+      shortcutIcon: sc ? faviconUrl(originOf(sc.url) || sc.url) : null,
       commandState,
       opensInCurrentTab,
     });
@@ -722,7 +727,7 @@ declare global {
 
     let base = null;
     if (activeShortcut) {
-      base = templateBase(shortcuts[activeShortcut]);
+      base = templateBase(shortcuts[activeShortcut].url);
       if (!base) return [];
     }
     const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -732,7 +737,7 @@ declare global {
     // many incidental-param variants a template surfaces don't crowd out the
     // genuinely distinct destinations; otherwise use the normal canonical key.
     const keyOf = (url: string) =>
-      activeShortcut ? shortcutDedupKey(url, shortcuts[activeShortcut]) : canon(url);
+      activeShortcut ? shortcutDedupKey(url, shortcuts[activeShortcut].url) : canon(url);
 
     // Top result: a website to visit. Prefer a visited domain we can autocomplete
     // to (so "linkedin.c" suggests the known "linkedin.com", matching the ghost);
@@ -791,9 +796,9 @@ declare global {
         ? {
             type: "search",
             term,
-            title: `Search “${activeShortcut}” for “${term}”`,
-            engineLabel: templateBase(shortcuts[activeShortcut]).host,
-            url: applyShortcut(shortcuts[activeShortcut], term),
+            title: `Search “${shortcuts[activeShortcut].name}” for “${term}”`,
+            engineLabel: templateBase(shortcuts[activeShortcut].url).host,
+            url: applyShortcut(shortcuts[activeShortcut].url, term),
           }
         : {
             type: "search",
@@ -1479,7 +1484,7 @@ declare global {
   function submit() {
     // Active shortcut pill: substitute the query into the template.
     if (activeShortcut) {
-      const url = applyShortcut(shortcuts[activeShortcut], input.value);
+      const url = applyShortcut(shortcuts[activeShortcut].url, input.value);
       if (url) dispatch(url);
       else close();
       return;

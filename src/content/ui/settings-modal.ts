@@ -6,6 +6,7 @@
 //                 inline form to add a new one (applied immediately).
 // Esc or a backdrop click closes.
 import { SETTING_DEFS, SETTING_CATEGORIES, type Settings } from "../../shared/settings";
+import type { Shortcut, Shortcuts } from "../../shared/types";
 
 const MODAL_HOST_ID = "arc-settings-modal-host";
 
@@ -79,13 +80,18 @@ const MODAL_CSS = `
   display: flex; align-items: center; gap: 10px;
   background: #fff; border: 1px solid #e6e6ec; border-radius: 10px; padding: 8px 10px;
 }
-.sc-alias { font-weight: 700; font-size: 14px; min-width: 72px; }
-.sc-url { flex: 1; font-size: 13px; color: #55555c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sc-remove {
+.sc-alias { font-weight: 700; font-size: 14px; min-width: 64px; flex: 0 0 auto; }
+.sc-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sc-name { font-size: 13px; font-weight: 600; color: #1a1a1f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-url { font-size: 12px; color: #7a7a80; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-edit, .sc-remove {
   all: unset; box-sizing: border-box; cursor: pointer;
   width: 26px; height: 26px; border-radius: 7px; text-align: center; line-height: 26px;
-  color: #b0303f; background: rgba(227,0,140,0.08); font-weight: 700;
+  font-weight: 700; flex: 0 0 auto;
 }
+.sc-edit { color: #4b6cff; background: rgba(75,108,255,0.10); }
+.sc-edit:hover { background: rgba(75,108,255,0.20); }
+.sc-remove { color: #b0303f; background: rgba(227,0,140,0.08); }
 .sc-remove:hover { background: rgba(227,0,140,0.16); }
 .sc-add { display: flex; gap: 8px; align-items: flex-start; }
 .sc-add input {
@@ -93,7 +99,8 @@ const MODAL_CSS = `
   background: #fff; border: 1px solid #d9d9e0; color: #1a1a1f; font-size: 13px;
 }
 .sc-add input:focus { border-color: #4b6cff; box-shadow: 0 0 0 3px rgba(75,108,255,0.18); }
-.sc-add .sc-add-alias { width: 120px; }
+.sc-add .sc-add-alias { width: 96px; }
+.sc-add .sc-add-name { width: 128px; }
 .sc-add .sc-add-url { flex: 1; }
 @media (prefers-color-scheme: dark) {
   .panel { background: #1e1e21; color: #f2f2f4; box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06); }
@@ -116,15 +123,20 @@ export interface SettingsModalHandle {
 export function openSettingsModal(opts: {
   settings: Settings;
   onSave: (next: Settings) => void;
-  shortcuts?: Record<string, string>;
-  onAddShortcut?: (alias: string, url: string) => void;
+  shortcuts?: Shortcuts;
+  // Upsert a shortcut. `prevAlias` (when editing) is the alias before the edit,
+  // so the caller can drop the old key if the alias itself changed.
+  onSaveShortcut?: (alias: string, shortcut: Shortcut, prevAlias?: string) => void;
   onRemoveShortcut?: (alias: string) => void;
 }): SettingsModalHandle {
   // Only one modal at a time.
   const existing = document.getElementById(MODAL_HOST_ID);
   if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
 
-  const shortcuts: Record<string, string> = { ...(opts.shortcuts || {}) };
+  const shortcuts: Shortcuts = {};
+  for (const a of Object.keys(opts.shortcuts || {})) {
+    shortcuts[a] = { ...(opts.shortcuts as Shortcuts)[a] };
+  }
 
   const host = document.createElement("div");
   host.id = MODAL_HOST_ID;
@@ -260,6 +272,12 @@ export function openSettingsModal(opts: {
   addAlias.autocapitalize = "off";
   addAlias.autocomplete = "off";
   addAlias.spellcheck = false;
+  const addName = document.createElement("input");
+  addName.className = "sc-add-name";
+  addName.placeholder = "name";
+  addName.autocapitalize = "off";
+  addName.autocomplete = "off";
+  addName.spellcheck = false;
   const addUrl = document.createElement("input");
   addUrl.className = "sc-add-url";
   addUrl.placeholder = "https://example.com/search?q=%s";
@@ -269,9 +287,15 @@ export function openSettingsModal(opts: {
   const addBtn = document.createElement("button");
   addBtn.className = "btn save sc-add-btn";
   addBtn.textContent = "Add";
+  const cancelEditBtn = document.createElement("button");
+  cancelEditBtn.className = "btn cancel sc-cancel-btn";
+  cancelEditBtn.textContent = "Cancel";
+  cancelEditBtn.style.display = "none";
   scAdd.appendChild(addAlias);
+  scAdd.appendChild(addName);
   scAdd.appendChild(addUrl);
   scAdd.appendChild(addBtn);
+  scAdd.appendChild(cancelEditBtn);
   const scError = document.createElement("div");
   scError.className = "sc-error";
   scSection.appendChild(scAdd);
@@ -300,6 +324,8 @@ export function openSettingsModal(opts: {
     scError.textContent = "";
   }
 
+  let editingAlias: string | null = null;
+
   function renderShortcuts() {
     scList.textContent = "";
     const aliases = Object.keys(shortcuts).sort();
@@ -311,15 +337,29 @@ export function openSettingsModal(opts: {
       return;
     }
     for (const alias of aliases) {
+      const sc = shortcuts[alias];
       const row = document.createElement("div");
       row.className = "sc-row";
       const a = document.createElement("div");
       a.className = "sc-alias";
       a.textContent = alias;
+      const meta = document.createElement("div");
+      meta.className = "sc-meta";
+      const nm = document.createElement("div");
+      nm.className = "sc-name";
+      nm.textContent = sc.name;
       const u = document.createElement("div");
       u.className = "sc-url";
-      u.textContent = shortcuts[alias];
-      u.title = shortcuts[alias];
+      u.textContent = sc.url;
+      u.title = sc.url;
+      meta.appendChild(nm);
+      meta.appendChild(u);
+      const edit = document.createElement("button");
+      edit.className = "sc-edit";
+      edit.textContent = "✎";
+      edit.title = `Edit "${alias}"`;
+      edit.setAttribute("data-alias", alias);
+      edit.addEventListener("click", () => beginEdit(alias));
       const rm = document.createElement("button");
       rm.className = "sc-remove";
       rm.textContent = "×";
@@ -327,21 +367,47 @@ export function openSettingsModal(opts: {
       rm.setAttribute("data-alias", alias);
       rm.addEventListener("click", () => removeShortcut(alias));
       row.appendChild(a);
-      row.appendChild(u);
+      row.appendChild(meta);
+      row.appendChild(edit);
       row.appendChild(rm);
       scList.appendChild(row);
     }
   }
 
+  function beginEdit(alias: string) {
+    const sc = shortcuts[alias];
+    if (!sc) return;
+    editingAlias = alias;
+    addAlias.value = alias;
+    addName.value = sc.name;
+    addUrl.value = sc.url;
+    addBtn.textContent = "Save";
+    cancelEditBtn.style.display = "";
+    scError.textContent = "";
+    addName.focus();
+  }
+
+  function cancelEdit() {
+    editingAlias = null;
+    addAlias.value = "";
+    addName.value = "";
+    addUrl.value = "";
+    addBtn.textContent = "Add";
+    cancelEditBtn.style.display = "none";
+    scError.textContent = "";
+  }
+
   function removeShortcut(alias: string) {
     delete shortcuts[alias];
     if (opts.onRemoveShortcut) opts.onRemoveShortcut(alias);
+    if (editingAlias === alias) cancelEdit();
     renderShortcuts();
   }
 
-  function addShortcut() {
+  function saveShortcut() {
     scError.textContent = "";
     const alias = addAlias.value.trim().toLowerCase();
+    const name = addName.value.trim();
     const url = addUrl.value.trim();
     if (!alias || /\s/.test(alias)) {
       scError.textContent = "Enter a single-word alias (no spaces).";
@@ -353,10 +419,19 @@ export function openSettingsModal(opts: {
       addUrl.focus();
       return;
     }
-    shortcuts[alias] = url;
-    if (opts.onAddShortcut) opts.onAddShortcut(alias, url);
-    addAlias.value = "";
-    addUrl.value = "";
+    // Adding (or renaming to) an alias that already exists — and isn't the row
+    // being edited — would silently overwrite it; block that.
+    if (alias !== editingAlias && shortcuts[alias]) {
+      scError.textContent = `An alias "${alias}" already exists.`;
+      addAlias.focus();
+      return;
+    }
+    const shortcut = { url, name: name || alias };
+    const prev = editingAlias;
+    if (prev && prev !== alias) delete shortcuts[prev];
+    shortcuts[alias] = shortcut;
+    if (opts.onSaveShortcut) opts.onSaveShortcut(alias, shortcut, prev || undefined);
+    cancelEdit();
     renderShortcuts();
     addAlias.focus();
   }
@@ -404,7 +479,7 @@ export function openSettingsModal(opts: {
       close();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (currentSection === "shortcuts") addShortcut();
+      if (currentSection === "shortcuts") saveShortcut();
       else saveGeneral();
     }
   }
@@ -414,7 +489,8 @@ export function openSettingsModal(opts: {
   });
   cancelBtn.addEventListener("click", close);
   saveBtn.addEventListener("click", saveGeneral);
-  addBtn.addEventListener("click", addShortcut);
+  addBtn.addEventListener("click", saveShortcut);
+  cancelEditBtn.addEventListener("click", cancelEdit);
   document.addEventListener("keydown", onKeyDown, true);
 
   renderShortcuts();

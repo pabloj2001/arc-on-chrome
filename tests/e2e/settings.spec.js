@@ -217,7 +217,7 @@ test.describe("settings (/settings command + modal)", () => {
     let stored = await serviceWorker.evaluate(
       () => new Promise((r) => chrome.storage.local.get("arcShortcuts", (v) => r(v.arcShortcuts || {})))
     );
-    expect(stored.gh).toBe("https://github.com/search?q=%s");
+    expect(stored.gh.url).toBe("https://github.com/search?q=%s");
     // remove the seeded "go" shortcut
     await page.evaluate((id) => {
       const host = document.getElementById(id);
@@ -228,7 +228,7 @@ test.describe("settings (/settings command + modal)", () => {
       () => new Promise((r) => chrome.storage.local.get("arcShortcuts", (v) => r(v.arcShortcuts || {})))
     );
     expect(stored.go).toBeUndefined();
-    expect(stored.gh).toBe("https://github.com/search?q=%s");
+    expect(stored.gh.url).toBe("https://github.com/search?q=%s");
   });
 });
 
