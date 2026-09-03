@@ -154,3 +154,44 @@ export function hostPath(u: string): HostPath | null {
     return null;
   }
 }
+
+// The query-string parameter name whose value is the `%s` placeholder in a
+// shortcut template, or null when `%s` isn't a query value (it's in the path, or
+// the template has no query). E.g. ".../results?query=%s&x=1" -> "query".
+export function shortcutParam(template: string): string | null {
+  const tpl = template || "";
+  const q = tpl.indexOf("?");
+  const s = tpl.indexOf("%s");
+  if (s === -1 || q === -1 || s < q) return null; // %s not in the query
+  for (const pair of tpl.slice(q + 1).split("&")) {
+    const eq = pair.indexOf("=");
+    const key = eq === -1 ? pair : pair.slice(0, eq);
+    const val = eq === -1 ? "" : pair.slice(eq + 1);
+    if (val.includes("%s")) return key || null;
+  }
+  return null;
+}
+
+// A de-dup key for a candidate URL *relative to a shortcut template*, so the
+// near-identical results a shortcut surfaces collapse to the value that actually
+// varies (the part `%s` fills), ignoring incidental query params.
+//   • `%s` in the query (e.g. "?query=%s"): key = host + path + that one param
+//     (all other params dropped), so "?query=X&current=2" == "?query=X".
+//   • `%s` in the path (e.g. "/dags/%s/grid"): key = host + path (query dropped),
+//     so ".../grid?tab=details" == ".../grid?task_id=…".
+// Falls back to `canon` when the URL can't be parsed against the template.
+export function shortcutDedupKey(url: string, template: string): string {
+  try {
+    const x = new URL(url);
+    const host = x.host.replace(/^www\./i, "");
+    const path = x.pathname.replace(/\/+$/, "");
+    const param = shortcutParam(template);
+    if (param) {
+      const val = new URLSearchParams(x.search).get(param);
+      return `${host}${path}?${param}=${val == null ? "" : val}`.toLowerCase();
+    }
+    return `${host}${path}`.toLowerCase();
+  } catch (_) {
+    return canon(url);
+  }
+}

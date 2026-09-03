@@ -154,6 +154,11 @@ alias becomes a pill and whatever you type next is substituted into the template
 - Press **space** after a registered alias to arm the pill; type your query and **Enter**.
 - While the pill is active, the result list shows your open tabs and history under the
   shortcut's destination (e.g. the `go` pill shows `https://go/*`), narrowing as you type.
+  These are **collapsed by the value the shortcut's `%s` fills**, so the many near-identical
+  variants of one destination don't crowd out the rest: for a path template like
+  `.../dags/%s/grid` the incidental query params (`?tab=…`, `?dag_run_id=…`) are ignored and you
+  get one row per DAG; for a query template like `?query=%s` only the `query` value matters, so
+  `?query=X&current=2&nresults=10` collapses into the single `?query=X` entry.
 - With the pill active and the query empty, press **Backspace** to remove the pill and get the
   plain word back (so you can use the word itself without the shortcut). The next space won't
   re-arm the same alias until you edit that first word.

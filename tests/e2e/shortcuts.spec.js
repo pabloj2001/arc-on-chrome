@@ -121,4 +121,39 @@ test.describe("keyword shortcuts (pills)", () => {
     const s = await h.readState(page);
     expect(s.pillText).toBe("");
   });
+
+  // A path-%s shortcut should collapse the many incidental-query-param variants
+  // of the same destination into one row, keeping genuinely distinct ones.
+  test("path-%s shortcut collapses query-param variants to one row per destination", async ({ page, serviceWorker, baseURL }) => {
+    await h.seedSettings(serviceWorker, { shortcuts: { afw: `${baseURL}/dags/%s/grid` } });
+    await h.seedHistory(serviceWorker, [
+      `${baseURL}/dags/sis-x/grid?tab=details&dag_run_id=r1`,
+      `${baseURL}/dags/sis-x/grid?task_id=T&tab=logs`,
+      `${baseURL}/dags/sis-x/grid?dag_run_id=r2`,
+      `${baseURL}/dags/log-compact/grid`,
+    ]);
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "afw ");
+    const s = await h.readState(page);
+    const hist = s.results.filter((r) => r.type === "history");
+    expect(hist).toHaveLength(2); // sis-x (once) + log-compact
+    expect(hist.some((r) => r.url.includes("/dags/sis-x/grid"))).toBe(true);
+    expect(hist.some((r) => r.url.includes("/dags/log-compact/grid"))).toBe(true);
+  });
+
+  // A query-%s shortcut should dedup by the %s param only, ignoring other params.
+  test("query-%s shortcut dedups by the %s param, ignoring other params", async ({ page, serviceWorker, baseURL }) => {
+    await h.seedSettings(serviceWorker, { shortcuts: { code: `${baseURL}/codesearch/results?query=%s` } });
+    await h.seedHistory(serviceWorker, [
+      `${baseURL}/codesearch/results?query=ABC`,
+      `${baseURL}/codesearch/results?query=ABC&current=2`,
+      `${baseURL}/codesearch/results?query=ABC&current=2&nresults=10`,
+      `${baseURL}/codesearch/results?query=XYZ`,
+    ]);
+    await h.openBarOn(page, serviceWorker);
+    await h.type(page, "code ");
+    const s = await h.readState(page);
+    const hist = s.results.filter((r) => r.type === "history");
+    expect(hist).toHaveLength(2); // query=ABC (once) + query=XYZ
+  });
 });

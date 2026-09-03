@@ -2,7 +2,7 @@ import {
   STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS,
 } from "../shared/constants";
 import {
-  normalizeUrl, buildUrl, applyShortcut, canon, hostPath,
+  normalizeUrl, buildUrl, applyShortcut, canon, hostPath, shortcutDedupKey,
   looksLikeNavigable, isSafeNavigationUrl,
 } from "../shared/url";
 import { MSG } from "../shared/messages";
@@ -728,6 +728,11 @@ declare global {
     const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const out: ResultRow[] = [];
     const seen = new Set<string>();
+    // With a shortcut active, collapse results by the value `%s` fills so the
+    // many incidental-param variants a template surfaces don't crowd out the
+    // genuinely distinct destinations; otherwise use the normal canonical key.
+    const keyOf = (url: string) =>
+      activeShortcut ? shortcutDedupKey(url, shortcuts[activeShortcut]) : canon(url);
 
     // Top result: a website to visit. Prefer a visited domain we can autocomplete
     // to (so "linkedin.c" suggests the known "linkedin.com", matching the ghost);
@@ -756,7 +761,7 @@ declare global {
       if (t.tabId === currentTabId) continue;
       if (base && !underBase(t.url, base)) continue;
       if (tokens.length && !matchesQuery(t, tokens)) continue;
-      const c = canon(t.url);
+      const c = keyOf(t.url);
       if (seen.has(c)) continue;
       seen.add(c);
       out.push({ type: "tab", title: t.title, url: t.url, tabId: t.tabId, windowId: t.windowId });
@@ -766,7 +771,7 @@ declare global {
     // Include history when there's a query, or a shortcut base to browse under.
     if (out.length < MAX_RESULTS && (tokens.length || base)) {
       for (const h of historyItems) {
-        const c = canon(h.url);
+        const c = keyOf(h.url);
         if (seen.has(c)) continue;
         if (base && !underBase(h.url, base)) continue;
         if (tokens.length && !matchesQuery(h, tokens)) continue;
