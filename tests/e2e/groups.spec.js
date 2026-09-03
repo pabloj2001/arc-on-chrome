@@ -129,6 +129,30 @@ test.describe("groups (Chrome tab groups)", () => {
     for (const p of pages) await p.close().catch(() => {});
   });
 
+  test("with 3+ groups only the active chip shows its name; the rest show just a number", async ({ context, serviceWorker, baseURL }) => {
+    const pages = [];
+    for (let i = 0; i < 3; i++) {
+      const p = await h.openTabAt(context, `${baseURL}/c-${i}`);
+      await p.bringToFront();
+      const res = await h.createGroup(serviceWorker, `grp${i}`);
+      expect(res.ok).toBe(true);
+      pages.push(p);
+    }
+    const last = pages[pages.length - 1]; // its group (grp2) is the active one
+    await h.openBarOn(last, serviceWorker);
+    const s = await h.readState(last);
+    const groups = s.groupChips.filter((c) => !c.isDefault && !c.isAdd);
+    const withName = groups.filter((c) => c.name && c.name.length);
+    // exactly one named chip — the active one — and it's grp2
+    expect(withName.length).toBe(1);
+    expect(withName[0].active).toBe(true);
+    expect(withName[0].name).toContain("grp2");
+    // the Default chip also collapses to just its number while a group is active
+    const def = s.groupChips.find((c) => c.isDefault);
+    expect(def.name).toBe("");
+    for (const p of pages) await p.close().catch(() => {});
+  });
+
   test("deletegroup closes the group's tabs", async ({ page, serviceWorker, baseURL }) => {
     const res = await h.createGroup(serviceWorker, "temp");
     await h.openBarOn(page, serviceWorker);
