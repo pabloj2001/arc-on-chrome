@@ -204,3 +204,50 @@ export function shortcutDedupKey(url: string, template: string): string {
     return canon(url);
   }
 }
+
+// decodeURIComponent that never throws (returns the raw string on malformed %).
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch (_) {
+    return s;
+  }
+}
+
+// The value `%s` would hold to reach `url` via `template` — i.e. what you'd type
+// after the shortcut alias to get there — or null when the URL doesn't fit the
+// template. Mirrors shortcutDedupKey's two cases:
+//   • `%s` in the query ("?q=%s"): the value of that param (decoded).
+//   • `%s` in the path ("/dags/%s/grid"): the segment between the template's
+//     fixed prefix and suffix (decoded), ignoring any query on the candidate.
+export function shortcutValue(url: string, template: string): string | null {
+  try {
+    const x = new URL(url);
+    const param = shortcutParam(template);
+    if (param) {
+      const v = new URLSearchParams(x.search).get(param);
+      return v == null ? null : safeDecode(v);
+    }
+    const idx = (template || "").indexOf("%s");
+    if (idx === -1) return null;
+    const strip = (s: string) =>
+      s
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+        .replace(/^www\./i, "")
+        .replace(/\/+$/, "");
+    const pre = strip(template.slice(0, idx));
+    const post = strip(template.slice(idx + 2).split(/[?#]/)[0]);
+    const cand = strip(x.host + x.pathname);
+    if (
+      cand.startsWith(pre) &&
+      cand.endsWith(post) &&
+      cand.length >= pre.length + post.length
+    ) {
+      const mid = cand.slice(pre.length, cand.length - post.length).replace(/^\/+|\/+$/g, "");
+      return mid ? safeDecode(mid) : null;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}

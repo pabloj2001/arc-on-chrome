@@ -2,7 +2,7 @@ import {
   STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS,
 } from "../shared/constants";
 import {
-  normalizeUrl, buildUrl, applyShortcut, canon, hostPath, shortcutDedupKey,
+  normalizeUrl, buildUrl, applyShortcut, canon, hostPath, shortcutDedupKey, shortcutValue,
   looksLikeNavigable, isSafeNavigationUrl, faviconUrl, originOf,
 } from "../shared/url";
 import { MSG } from "../shared/messages";
@@ -762,6 +762,18 @@ declare global {
       }
     }
 
+    // With a shortcut active, title each result with the value `%s` would hold to
+    // reach it (what you'd type after the alias) instead of the page title, so a
+    // row like "google.ca/?q=hello&x=1" reads simply as "hello".
+    const tpl = activeShortcut ? shortcuts[activeShortcut].url : null;
+    const titleFor = (url: string, fallback?: string) => {
+      if (tpl) {
+        const v = shortcutValue(url, tpl);
+        if (v) return v;
+      }
+      return fallback || url;
+    };
+
     for (const t of openTabs) {
       if (t.tabId === currentTabId) continue;
       if (base && !underBase(t.url, base)) continue;
@@ -769,7 +781,7 @@ declare global {
       const c = keyOf(t.url);
       if (seen.has(c)) continue;
       seen.add(c);
-      out.push({ type: "tab", title: t.title, url: t.url, tabId: t.tabId, windowId: t.windowId });
+      out.push({ type: "tab", title: titleFor(t.url, t.title), url: t.url, tabId: t.tabId, windowId: t.windowId });
       if (out.length >= MAX_RESULTS) break;
     }
 
@@ -781,7 +793,7 @@ declare global {
         if (base && !underBase(h.url, base)) continue;
         if (tokens.length && !matchesQuery(h, tokens)) continue;
         seen.add(c);
-        out.push({ type: "history", title: h.title, url: h.url });
+        out.push({ type: "history", title: titleFor(h.url, h.title), url: h.url });
         if (out.length >= MAX_RESULTS) break;
       }
     }

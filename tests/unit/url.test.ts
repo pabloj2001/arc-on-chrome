@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseUrl, tabMatchesFavorite, looksLikeNavigable, schemeFor, normalizeUrl,
   buildUrl, ensureScheme, applyShortcut, canon, hostPath, isSafeNavigationUrl,
-  shortcutParam, shortcutDedupKey,
+  shortcutParam, shortcutDedupKey, shortcutValue,
 } from "../../src/shared/url";
 
 describe("parseUrl", () => {
@@ -159,5 +159,31 @@ describe("shortcutDedupKey", () => {
     expect(
       shortcutDedupKey("https://jarvis.corp.linkedin.com/codesearch/results?query=XYZ", tpl)
     ).not.toBe(k);
+  });
+});
+
+describe("shortcutValue", () => {
+  it("query %s: returns the (decoded) value of that param", () => {
+    const tpl = "https://google.ca/?q=%s";
+    expect(shortcutValue("https://google.ca/?q=hello&blah=1", tpl)).toBe("hello");
+    expect(shortcutValue("https://google.ca/?q=hello%20world", tpl)).toBe("hello world");
+    // Missing param -> null.
+    expect(shortcutValue("https://google.ca/?x=1", tpl)).toBeNull();
+  });
+
+  it("path %s: returns the segment between the fixed prefix and suffix", () => {
+    const tpl = "https://war.grid.linkedin.com/dags/%s/grid";
+    expect(
+      shortcutValue("https://war.grid.linkedin.com/dags/sis-x/grid?tab=details", tpl)
+    ).toBe("sis-x");
+    // A trailing-%s template.
+    expect(shortcutValue("https://go/deploy", "https://go/%s")).toBe("deploy");
+    // Doesn't fit the template -> null.
+    expect(shortcutValue("https://war.grid.linkedin.com/other/x", tpl)).toBeNull();
+  });
+
+  it("returns null when there's no value / not parseable", () => {
+    expect(shortcutValue("https://go/", "https://go/%s")).toBeNull();
+    expect(shortcutValue("not a url", "https://go/%s")).toBeNull();
   });
 });

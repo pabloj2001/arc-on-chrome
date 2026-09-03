@@ -194,6 +194,8 @@ test.describe("keyword shortcuts (pills)", () => {
     expect(hist).toHaveLength(2); // sis-x (once) + log-compact
     expect(hist.some((r) => r.url.includes("/dags/sis-x/grid"))).toBe(true);
     expect(hist.some((r) => r.url.includes("/dags/log-compact/grid"))).toBe(true);
+    // Titles are the %s value (the path segment), not the page title.
+    expect(hist.map((r) => r.title).sort()).toEqual(["log-compact", "sis-x"]);
   });
 
   // A query-%s shortcut should dedup by the %s param only, ignoring other params.
@@ -210,5 +212,7 @@ test.describe("keyword shortcuts (pills)", () => {
     const s = await h.readState(page);
     const hist = s.results.filter((r) => r.type === "history");
     expect(hist).toHaveLength(2); // query=ABC (once) + query=XYZ
+    // Titles are the %s value (the query value), not the page title.
+    expect(hist.map((r) => r.title).sort()).toEqual(["ABC", "XYZ"]);
   });
 });
