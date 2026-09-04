@@ -185,16 +185,29 @@ test.describe("groups (Chrome tab groups)", () => {
     for (const p of pages) await p.close().catch(() => {});
   });
 
-  test("a 'Ctrl +' hint precedes the chips", async ({ page, serviceWorker }) => {
+  test("a 'Ctrl +' hint precedes the chips and shows on row hover", async ({ page, serviceWorker }) => {
     await h.createGroup(serviceWorker, "work");
     await h.openBarOn(page, serviceWorker);
-    const hint = await page.evaluate((host) => {
+    const before = await page.evaluate((host) => {
       const row = document.getElementById(host).shadowRoot.querySelector(".contexts-row");
       const el = row.querySelector(".ctx-hint");
-      return { text: el ? el.textContent : null, isFirst: row.firstElementChild === el };
+      return {
+        text: el ? el.textContent : null,
+        isFirst: row.firstElementChild === el,
+        opacity: el ? getComputedStyle(el).opacity : null,
+      };
     }, h.HOST);
-    expect(hint.text).toBe("Ctrl +");
-    expect(hint.isFirst).toBe(true);
+    expect(before.text).toBe("Ctrl +");
+    expect(before.isFirst).toBe(true);
+    expect(Number(before.opacity)).toBe(0); // hidden until the row is hovered
+
+    await page.locator(".contexts-row").hover();
+    await h.sleep(200);
+    const shown = await page.evaluate((host) => {
+      const el = document.getElementById(host).shadowRoot.querySelector(".ctx-hint");
+      return getComputedStyle(el).opacity;
+    }, h.HOST);
+    expect(Number(shown)).toBeGreaterThan(0.5);
   });
 
   test("selecting a group animates its name open and collapses the previously active one", async ({ context, serviceWorker, baseURL }) => {
@@ -208,6 +221,15 @@ test.describe("groups (Chrome tab groups)", () => {
     }
     const last = pages[pages.length - 1]; // grp2 active
     await h.openBarOn(last, serviceWorker);
+    // Tag the Default chip's name element so we can prove it's the SAME element
+    // after switching (not rebuilt) — that persistence is what lets it animate.
+    await last.evaluate((host) => {
+      const row = document.getElementById(host).shadowRoot.querySelector(".contexts-row");
+      const chips = [...row.querySelectorAll(".ctx-chip")];
+      const def = chips.find((c) => c.querySelector(".ctx-num").textContent === "1");
+      def.querySelector(".ctx-cname").dataset.marked = "1";
+    }, h.HOST);
+
     await h.press(last, "Control+1"); // switch to the default space
     await h.sleep(320); // let the expand/collapse transition settle
     const op = await last.evaluate((host) => {
@@ -215,9 +237,12 @@ test.describe("groups (Chrome tab groups)", () => {
       const chips = [...row.querySelectorAll(".ctx-chip")];
       const byNum = (n) => chips.find((c) => c.querySelector(".ctx-num") && c.querySelector(".ctx-num").textContent === n);
       const opacity = (c) => (c ? getComputedStyle(c.querySelector(".ctx-cname")).opacity : null);
-      return { def: opacity(byNum("1")), grp2: opacity(byNum("4")) };
+      const defName = byNum("1").querySelector(".ctx-cname");
+      return { def: opacity(byNum("1")), grp2: opacity(byNum("4")), defMarked: defName.dataset.marked === "1" };
     }, h.HOST);
-    // Default (now active) slid its name open; the previously active grp2 collapsed.
+    // The Default chip element survived the switch (so its transition can run)…
+    expect(op.defMarked).toBe(true);
+    // …and Default (now active) slid its name open while grp2 collapsed.
     expect(Number(op.def)).toBeGreaterThan(0.5);
     expect(Number(op.grp2)).toBeLessThan(0.5);
     for (const p of pages) await p.close().catch(() => {});

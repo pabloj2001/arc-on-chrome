@@ -104,9 +104,14 @@ export function renderGroupsRow({ el, groups, activeGroup, onDefault, onSwitch, 
   }) as Clickable;
   add._onClick = onAdd;
 
-  // Put the (possibly reused) nodes in the right order; appendChild moves an
-  // existing child, so this both orders and inserts new nodes.
-  for (const key of order) row.appendChild(cache.get(key) as HTMLElement);
+  // Order the nodes, moving ONLY those whose position actually changed — moving a
+  // node detaches/reattaches it and would reset its CSS transition, which is why
+  // selecting a chip (Ctrl+N/click) wouldn't animate. Untouched nodes keep their
+  // transition, so toggling .active slides the name open/closed.
+  order.forEach((key, i) => {
+    const node = cache.get(key) as HTMLElement;
+    if (row.children[i] !== node) row.insertBefore(node, row.children[i] || null);
+  });
   // Drop any chips whose group went away.
   for (const key of Array.from(cache.keys())) {
     if (!used.has(key)) {

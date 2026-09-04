@@ -125,14 +125,17 @@ input::placeholder { color: #9a9aa2; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0; max-width: 160px;
 }
-/* Small "Ctrl +" hint before the chips, nudging the keyboard shortcuts. */
+/* Small "Ctrl +" hint before the chips, revealed only while the row is hovered
+   (kept in layout so the chips don't shift — it just fades in/out). */
 .ctx-hint {
   align-self: center; flex: 0 0 auto; white-space: nowrap;
   color: rgba(255,255,255,0.78); font-size: 12px; font-weight: 700;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0.2px; margin-right: 2px; user-select: none; pointer-events: none;
   text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  opacity: 0; transition: opacity 130ms ease;
 }
+.contexts-row:hover .ctx-hint { opacity: 1; }
 /* Collapsed row (3+ groups): every chip's name is collapsed by default and
    slides open (max-width + opacity) when the chip is active or hovered — so
    selecting/deselecting (incl. Ctrl+N) animates in and reverses out. The
