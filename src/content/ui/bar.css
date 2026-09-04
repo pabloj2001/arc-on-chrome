@@ -95,7 +95,7 @@ input::placeholder { color: #9a9aa2; }
   min-width: 0;
 }
 .ctx-chip {
-  all: unset; box-sizing: border-box; cursor: pointer;
+  all: unset; box-sizing: border-box; cursor: pointer; position: relative;
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   height: 30px; padding: 0 12px; border-radius: 10px; color: #fff;
   background: #4b6cff; opacity: 0.82;
@@ -125,10 +125,22 @@ input::placeholder { color: #9a9aa2; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0; max-width: 160px;
 }
-/* Collapsed row (3+ groups): only the active chip shows its name inline; the
-   rest hide it and reveal it on hover. */
-.contexts-row.ctx-collapsed .ctx-chip:not(.active) .ctx-cname { display: none; }
-.contexts-row.ctx-collapsed .ctx-chip:not(.active):hover .ctx-cname { display: inline-block; }
+/* Collapsed row (3+ groups): the non-active chips show just their number. Their
+   name floats above the chip as a tooltip that slides in on hover — so revealing
+   it never resizes/moves the chips (no reflow, easy to keep hovering). */
+.contexts-row.ctx-collapsed .ctx-chip:not(.active) .ctx-cname {
+  position: absolute; left: 50%; bottom: calc(100% + 6px);
+  max-width: 220px; margin: 0; padding: 3px 8px; border-radius: 7px;
+  background: #1e1e21; color: #fff; font-size: 12px; font-weight: 600;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+  pointer-events: none; opacity: 0;
+  transform: translateX(-50%) translateY(4px);
+  transition: opacity 130ms ease, transform 130ms ease;
+  z-index: 5;
+}
+.contexts-row.ctx-collapsed .ctx-chip:not(.active):hover .ctx-cname {
+  opacity: 1; transform: translateX(-50%) translateY(0);
+}
 .fave {
   all: unset; box-sizing: border-box; position: relative;
   width: 46px; height: 46px; border-radius: 12px; cursor: pointer;
