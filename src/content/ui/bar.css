@@ -92,7 +92,7 @@ input::placeholder { color: #9a9aa2; }
 .faves { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .contexts-row {
   display: none; gap: 8px; justify-content: center; flex-wrap: nowrap;
-  overflow: hidden; min-width: 0;
+  min-width: 0;
 }
 .ctx-chip {
   all: unset; box-sizing: border-box; cursor: pointer;
