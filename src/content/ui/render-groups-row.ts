@@ -15,8 +15,10 @@ export function renderGroupsRow({ el, groups, activeGroup, onDefault, onSwitch, 
   el.style.display = "flex";
 
   // With 3+ groups (besides Default) the row gets crowded, so collapse it: only
-  // the active chip shows its name; every other chip shows just its number.
+  // the active chip shows its name inline; every other chip shows just its number
+  // and reveals its name on hover (handled in CSS via .ctx-collapsed).
   const collapse = groups.length >= 3;
+  el.classList.toggle("ctx-collapsed", collapse);
 
   // Default (no group) chip, number 1.
   const def = document.createElement("button");
@@ -25,13 +27,11 @@ export function renderGroupsRow({ el, groups, activeGroup, onDefault, onSwitch, 
   const dnum = document.createElement("span");
   dnum.className = "ctx-num";
   dnum.textContent = "1";
+  const dnm = document.createElement("span");
+  dnm.className = "ctx-cname";
+  dnm.textContent = "Default";
   def.appendChild(dnum);
-  if (!collapse || !activeGroup) {
-    const dnm = document.createElement("span");
-    dnm.className = "ctx-cname";
-    dnm.textContent = "Default";
-    def.appendChild(dnm);
-  }
+  def.appendChild(dnm);
   def.addEventListener("click", onDefault);
   el.appendChild(def);
 
@@ -46,13 +46,11 @@ export function renderGroupsRow({ el, groups, activeGroup, onDefault, onSwitch, 
     const num = document.createElement("span");
     num.className = "ctx-num";
     num.textContent = String(i + 2);
+    const nm = document.createElement("span");
+    nm.className = "ctx-cname";
+    nm.textContent = c.name;
     chip.appendChild(num);
-    if (!collapse || isActive) {
-      const nm = document.createElement("span");
-      nm.className = "ctx-cname";
-      nm.textContent = c.name;
-      chip.appendChild(nm);
-    }
+    chip.appendChild(nm);
     chip.addEventListener("click", () => onSwitch(c.groupId));
     el.appendChild(chip);
   });

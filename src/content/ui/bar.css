@@ -125,6 +125,10 @@ input::placeholder { color: #9a9aa2; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0; max-width: 160px;
 }
+/* Collapsed row (3+ groups): only the active chip shows its name inline; the
+   rest hide it and reveal it on hover. */
+.contexts-row.ctx-collapsed .ctx-chip:not(.active) .ctx-cname { display: none; }
+.contexts-row.ctx-collapsed .ctx-chip:not(.active):hover .ctx-cname { display: inline-block; }
 .fave {
   all: unset; box-sizing: border-box; position: relative;
   width: 46px; height: 46px; border-radius: 12px; cursor: pointer;

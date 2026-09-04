@@ -129,7 +129,7 @@ test.describe("groups (Chrome tab groups)", () => {
     for (const p of pages) await p.close().catch(() => {});
   });
 
-  test("with 3+ groups only the active chip shows its name; the rest show just a number", async ({ context, serviceWorker, baseURL }) => {
+  test("with 3+ groups only the active chip shows its name; the rest reveal it on hover", async ({ context, serviceWorker, baseURL }) => {
     const pages = [];
     for (let i = 0; i < 3; i++) {
       const p = await h.openTabAt(context, `${baseURL}/c-${i}`);
@@ -140,16 +140,47 @@ test.describe("groups (Chrome tab groups)", () => {
     }
     const last = pages[pages.length - 1]; // its group (grp2) is the active one
     await h.openBarOn(last, serviceWorker);
-    const s = await h.readState(last);
-    const groups = s.groupChips.filter((c) => !c.isDefault && !c.isAdd);
-    const withName = groups.filter((c) => c.name && c.name.length);
-    // exactly one named chip — the active one — and it's grp2
-    expect(withName.length).toBe(1);
-    expect(withName[0].active).toBe(true);
-    expect(withName[0].name).toContain("grp2");
-    // the Default chip also collapses to just its number while a group is active
-    const def = s.groupChips.find((c) => c.isDefault);
-    expect(def.name).toBe("");
+
+    const info = await last.evaluate((host) => {
+      const sr = document.getElementById(host).shadowRoot;
+      const row = sr.querySelector(".contexts-row");
+      const chips = [...row.querySelectorAll(".ctx-chip")].filter(
+        (c) => !c.classList.contains("ctx-add")
+      );
+      return {
+        collapsed: row.classList.contains("ctx-collapsed"),
+        chips: chips.map((c) => {
+          const cname = c.querySelector(".ctx-cname");
+          return {
+            active: c.classList.contains("active"),
+            name: cname ? cname.textContent : "",
+            shown: cname ? getComputedStyle(cname).display !== "none" : false,
+          };
+        }),
+      };
+    }, h.HOST);
+
+    expect(info.collapsed).toBe(true);
+    // The name is present in the DOM for every chip, but only the active one is shown.
+    const shown = info.chips.filter((c) => c.shown);
+    expect(shown.length).toBe(1);
+    expect(shown[0].active).toBe(true);
+    expect(shown[0].name).toContain("grp2");
+    // A non-active chip keeps its name in the DOM, just hidden.
+    const hiddenNamed = info.chips.filter((c) => !c.shown && c.name);
+    expect(hiddenNamed.length).toBeGreaterThanOrEqual(1);
+
+    // Hovering a collapsed (non-active) chip reveals its name.
+    const groupTwo = last
+      .locator(".ctx-chip")
+      .filter({ has: last.locator(".ctx-num", { hasText: /^2$/ }) });
+    await groupTwo.hover();
+    await h.sleep(80);
+    const revealed = await groupTwo.evaluate(
+      (c) => getComputedStyle(c.querySelector(".ctx-cname")).display !== "none"
+    );
+    expect(revealed).toBe(true);
+
     for (const p of pages) await p.close().catch(() => {});
   });
 
