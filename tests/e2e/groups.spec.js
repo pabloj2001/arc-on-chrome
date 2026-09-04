@@ -185,6 +185,44 @@ test.describe("groups (Chrome tab groups)", () => {
     for (const p of pages) await p.close().catch(() => {});
   });
 
+  test("a 'Ctrl +' hint precedes the chips", async ({ page, serviceWorker }) => {
+    await h.createGroup(serviceWorker, "work");
+    await h.openBarOn(page, serviceWorker);
+    const hint = await page.evaluate((host) => {
+      const row = document.getElementById(host).shadowRoot.querySelector(".contexts-row");
+      const el = row.querySelector(".ctx-hint");
+      return { text: el ? el.textContent : null, isFirst: row.firstElementChild === el };
+    }, h.HOST);
+    expect(hint.text).toBe("Ctrl +");
+    expect(hint.isFirst).toBe(true);
+  });
+
+  test("selecting a group animates its name open and collapses the previously active one", async ({ context, serviceWorker, baseURL }) => {
+    const pages = [];
+    for (let i = 0; i < 3; i++) {
+      const p = await h.openTabAt(context, `${baseURL}/s-${i}`);
+      await p.bringToFront();
+      const res = await h.createGroup(serviceWorker, `grp${i}`);
+      expect(res.ok).toBe(true);
+      pages.push(p);
+    }
+    const last = pages[pages.length - 1]; // grp2 active
+    await h.openBarOn(last, serviceWorker);
+    await h.press(last, "Control+1"); // switch to the default space
+    await h.sleep(320); // let the expand/collapse transition settle
+    const op = await last.evaluate((host) => {
+      const row = document.getElementById(host).shadowRoot.querySelector(".contexts-row");
+      const chips = [...row.querySelectorAll(".ctx-chip")];
+      const byNum = (n) => chips.find((c) => c.querySelector(".ctx-num") && c.querySelector(".ctx-num").textContent === n);
+      const opacity = (c) => (c ? getComputedStyle(c.querySelector(".ctx-cname")).opacity : null);
+      return { def: opacity(byNum("1")), grp2: opacity(byNum("4")) };
+    }, h.HOST);
+    // Default (now active) slid its name open; the previously active grp2 collapsed.
+    expect(Number(op.def)).toBeGreaterThan(0.5);
+    expect(Number(op.grp2)).toBeLessThan(0.5);
+    for (const p of pages) await p.close().catch(() => {});
+  });
+
   test("deletegroup closes the group's tabs", async ({ page, serviceWorker, baseURL }) => {
     const res = await h.createGroup(serviceWorker, "temp");
     await h.openBarOn(page, serviceWorker);

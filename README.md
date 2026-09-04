@@ -57,13 +57,14 @@ create yourself from the browser UI. One group can be **active**, which is where
 - `/group` with **no name** returns to the default space (ungrouped). `/deletegroup <name>`
   closes that group's tabs (Chrome removes the now-empty group).
 
-A row above the bar shows the **default space** and each open group as numbered chips (colored to
-match the tab group), plus a **+** chip to create a new one. Switch with a click or
-**Ctrl+1** (default), **Ctrl+2** (first group), … ; **Ctrl++** opens the new-group command.
-The row never wraps to a second line — if it runs out of space, group **names ellipsize**. And
-once you have **3 or more groups**, the chips collapse to just their numbers, with only the
-**active** chip showing its name; **hover** any collapsed chip and its name slides in inline as
-the chip smoothly expands.
+A row above the bar shows a small **Ctrl +** hint, the **default space**, and each open group as
+numbered chips (colored to match the tab group), plus a **+** chip to create a new one. Switch
+with a click or **Ctrl+1** (default), **Ctrl+2** (first group), … ; **Ctrl++** opens the
+new-group command. The row never wraps to a second line — if it runs out of space, group
+**names ellipsize**. And once you have **3 or more groups**, the chips collapse to just their
+numbers, with only the **active** chip showing its name; **hover** any collapsed chip, or select
+it (click / **Ctrl+N**), and its name slides in inline as the chip smoothly expands — deselecting
+reverses the animation.
 While a group is active the bar's border, search icon, and a faint background tint take on the
 group's color. Press **← (Left arrow)** at the start of the input — or **Backspace** while the
 bar is empty — to *temporarily* leave the group so the next tab opens in the default space; it

@@ -125,14 +125,23 @@ input::placeholder { color: #9a9aa2; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0; max-width: 160px;
 }
-/* Collapsed row (3+ groups): non-active chips show just their number, then slide
-   the name in inline on hover by expanding the chip (max-width + opacity animate;
-   the negative margin cancels the flex gap so there's no empty space when the
-   name is collapsed). */
-.contexts-row.ctx-collapsed .ctx-chip:not(.active) .ctx-cname {
+/* Small "Ctrl +" hint before the chips, nudging the keyboard shortcuts. */
+.ctx-hint {
+  align-self: center; flex: 0 0 auto; white-space: nowrap;
+  color: rgba(255,255,255,0.78); font-size: 12px; font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0.2px; margin-right: 2px; user-select: none; pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+}
+/* Collapsed row (3+ groups): every chip's name is collapsed by default and
+   slides open (max-width + opacity) when the chip is active or hovered — so
+   selecting/deselecting (incl. Ctrl+N) animates in and reverses out. The
+   negative margin cancels the flex gap while the name is collapsed. */
+.contexts-row.ctx-collapsed .ctx-chip .ctx-cname {
   max-width: 0; opacity: 0; margin-left: -6px;
   transition: max-width 220ms ease, opacity 160ms ease, margin-left 220ms ease;
 }
+.contexts-row.ctx-collapsed .ctx-chip.active .ctx-cname,
 .contexts-row.ctx-collapsed .ctx-chip:not(.active):hover .ctx-cname {
   max-width: 160px; opacity: 1; margin-left: 0;
 }
