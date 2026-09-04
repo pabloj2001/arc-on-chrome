@@ -162,7 +162,7 @@ test.describe("groups (Chrome tab groups)", () => {
 
     expect(info.collapsed).toBe(true);
     // The name is present in the DOM for every chip, but only the active one is
-    // visible; the rest are transparent tooltips shown on hover.
+    // visible; the rest are collapsed (opacity 0 / max-width 0) until hovered.
     const shown = info.chips.filter((c) => c.shown);
     expect(shown.length).toBe(1);
     expect(shown[0].active).toBe(true);
@@ -171,12 +171,12 @@ test.describe("groups (Chrome tab groups)", () => {
     const hiddenNamed = info.chips.filter((c) => !c.shown && c.name);
     expect(hiddenNamed.length).toBeGreaterThanOrEqual(1);
 
-    // Hovering a collapsed (non-active) chip fades its name tooltip in.
+    // Hovering a collapsed (non-active) chip slides/expands its name in.
     const groupTwo = last
       .locator(".ctx-chip")
       .filter({ has: last.locator(".ctx-num", { hasText: /^2$/ }) });
     await groupTwo.hover();
-    await h.sleep(250); // let the fade/slide transition finish
+    await h.sleep(300); // let the expand/fade transition finish
     const revealedOpacity = await groupTwo.evaluate(
       (c) => getComputedStyle(c.querySelector(".ctx-cname")).opacity
     );
