@@ -150,3 +150,48 @@ describe("expiredTabIds with working hours", () => {
     expect(expiredTabIds([t, filler], now, thresholds, noWeekend)).toEqual([1]);
   });
 });
+
+import { orderGroupsByStrip } from "../../src/background/groups";
+
+describe("orderGroupsByStrip", () => {
+  const g = (id) => ({ id });
+
+  it("orders groups by their earliest tab's index (not by id)", () => {
+    // Group 10 sits later in the strip than group 20 (index 5 vs 1).
+    const groups = [g(10), g(20)];
+    const tabs = [
+      { groupId: 20, windowId: 1, index: 1 },
+      { groupId: 20, windowId: 1, index: 2 },
+      { groupId: 10, windowId: 1, index: 5 },
+    ];
+    expect(orderGroupsByStrip(groups, tabs).map((x) => x.id)).toEqual([20, 10]);
+  });
+
+  it("orders across windows by windowId then index", () => {
+    const groups = [g(1), g(2), g(3)];
+    const tabs = [
+      { groupId: 3, windowId: 2, index: 0 },
+      { groupId: 1, windowId: 1, index: 3 },
+      { groupId: 2, windowId: 1, index: 0 },
+    ];
+    // window 1 (grp2 idx0, grp1 idx3) then window 2 (grp3).
+    expect(orderGroupsByStrip(groups, tabs).map((x) => x.id)).toEqual([2, 1, 3]);
+  });
+
+  it("ignores ungrouped tabs and falls back to id for tab-less groups", () => {
+    const groups = [g(7), g(9)];
+    const tabs = [
+      { groupId: -1, windowId: 1, index: 0 }, // ungrouped, ignored
+      { groupId: 9, windowId: 1, index: 4 },
+      // group 7 has no tabs -> sorts after, by id
+    ];
+    expect(orderGroupsByStrip(groups, tabs).map((x) => x.id)).toEqual([9, 7]);
+  });
+
+  it("does not mutate the input array", () => {
+    const groups = [g(3), g(1)];
+    const copy = groups.slice();
+    orderGroupsByStrip(groups, [{ groupId: 1, windowId: 1, index: 0 }]);
+    expect(groups).toEqual(copy);
+  });
+});

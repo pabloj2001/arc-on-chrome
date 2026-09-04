@@ -58,7 +58,7 @@ create yourself from the browser UI. One group can be **active**, which is where
   closes that group's tabs (Chrome removes the now-empty group).
 
 A row above the bar shows the **default space** and each open group as numbered chips (colored to
-match the tab group), plus a **+** chip to create a new one; **hovering the row** reveals a small
+match the tab group, in the **same order as the tab strip**), plus a **+** chip to create a new one; **hovering the row** reveals a small
 **Ctrl +** hint nudging the shortcuts. Switch with a click or **Ctrl+1** (default), **Ctrl+2**
 (first group), … ; **Ctrl++** opens the new-group command. The row never wraps to a second line —
 if it runs out of space, group **names ellipsize**. And once you have **3 or more groups**, the

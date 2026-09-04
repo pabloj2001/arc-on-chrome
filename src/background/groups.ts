@@ -79,13 +79,47 @@ function toInfo(g: chrome.tabGroups.TabGroup): GroupInfo {
   return { groupId: g.id, name: g.title || "Untitled", color: g.color };
 }
 
-// All open tab groups, ordered by id for a stable numbered row.
+// Pure: order tab groups the way they sit in the tab strip — by their earliest
+// tab's position (window, then tab index), falling back to id when a group has
+// no tabs. `chrome.tabGroups.query` returns groups in id (creation) order, which
+// doesn't reflect dragging a group along the strip; this makes the numbered row
+// match what the user sees.
+export function orderGroupsByStrip<T extends { id: number }>(
+  groups: T[],
+  tabs: { groupId?: number; windowId?: number; index?: number }[]
+): T[] {
+  const pos = new Map<number, { windowId: number; index: number }>();
+  for (const t of tabs) {
+    if (t.groupId == null || t.groupId < 0) continue;
+    const w = t.windowId ?? 0;
+    const idx = t.index ?? 0;
+    const cur = pos.get(t.groupId);
+    if (!cur || w < cur.windowId || (w === cur.windowId && idx < cur.index)) {
+      pos.set(t.groupId, { windowId: w, index: idx });
+    }
+  }
+  return groups.slice().sort((a, b) => {
+    const pa = pos.get(a.id);
+    const pb = pos.get(b.id);
+    if (!pa && !pb) return a.id - b.id;
+    if (!pa) return 1;
+    if (!pb) return -1;
+    if (pa.windowId !== pb.windowId) return pa.windowId - pb.windowId;
+    if (pa.index !== pb.index) return pa.index - pb.index;
+    return a.id - b.id;
+  });
+}
+
+// All open tab groups, ordered to match the tab strip (see orderGroupsByStrip).
 export function queryGroups(): Promise<chrome.tabGroups.TabGroup[]> {
   return new Promise((resolve) =>
     chrome.tabGroups.query({}, (groups) => {
       void chrome.runtime.lastError;
-      const list = (groups || []).slice().sort((a, b) => a.id - b.id);
-      resolve(list);
+      const list = (groups || []).slice();
+      chrome.tabs.query({}, (tabs) => {
+        void chrome.runtime.lastError;
+        resolve(orderGroupsByStrip(list, tabs || []));
+      });
     })
   );
 }

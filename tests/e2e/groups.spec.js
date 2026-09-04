@@ -248,6 +248,42 @@ test.describe("groups (Chrome tab groups)", () => {
     for (const p of pages) await p.close().catch(() => {});
   });
 
+  test("the omni group order matches the tab-strip order (follows a group move)", async ({ context, serviceWorker, baseURL }) => {
+    const pa = await h.openTabAt(context, baseURL + "/a");
+    await pa.bringToFront();
+    const rA = await h.createGroup(serviceWorker, "aaa");
+    expect(rA.ok).toBe(true);
+    const pb = await h.openTabAt(context, baseURL + "/b");
+    await pb.bringToFront();
+    const rB = await h.createGroup(serviceWorker, "bbb");
+    expect(rB.ok).toBe(true);
+
+    // Initially aaa comes before bbb in the strip.
+    await h.openBarOn(pb, serviceWorker);
+    let names = (await h.readState(pb)).groupChips
+      .filter((c) => !c.isDefault && !c.isAdd)
+      .map((c) => c.name);
+    expect(names).toEqual(["aaa", "bbb"]);
+
+    // Drag bbb to the front of the strip.
+    await serviceWorker.evaluate(
+      (gid) => new Promise((r) => chrome.tabGroups.move(gid, { index: 0 }, () => r())),
+      rB.groupId
+    );
+    await h.sleep(150);
+
+    // Reopen the bar; the order now mirrors the strip: bbb, then aaa.
+    await h.press(pb, "Escape");
+    await h.openBarOn(pb, serviceWorker);
+    names = (await h.readState(pb)).groupChips
+      .filter((c) => !c.isDefault && !c.isAdd)
+      .map((c) => c.name);
+    expect(names).toEqual(["bbb", "aaa"]);
+
+    await pa.close().catch(() => {});
+    await pb.close().catch(() => {});
+  });
+
   test("deletegroup closes the group's tabs", async ({ page, serviceWorker, baseURL }) => {
     const res = await h.createGroup(serviceWorker, "temp");
     await h.openBarOn(page, serviceWorker);
