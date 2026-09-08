@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseUrl, tabMatchesFavorite, looksLikeNavigable, schemeFor, normalizeUrl,
   buildUrl, ensureScheme, applyShortcut, canon, hostPath, isSafeNavigationUrl,
+  shortcutParam, shortcutDedupKey, shortcutValue,
 } from "../../src/shared/url";
 
 describe("parseUrl", () => {
@@ -112,5 +113,77 @@ describe("hostPath", () => {
       host: "example.com",
       path: "/a",
     });
+  });
+});
+
+describe("shortcutParam", () => {
+  it("names the query param whose value is %s", () => {
+    expect(shortcutParam("https://jarvis/codesearch/results?query=%s")).toBe("query");
+    expect(shortcutParam("https://x/s?a=1&q=%s&b=2")).toBe("q");
+  });
+  it("is null when %s is in the path or there's no query", () => {
+    expect(shortcutParam("https://war/dags/%s/grid")).toBeNull();
+    expect(shortcutParam("https://go/%s")).toBeNull();
+    // %s before the '?' is a path placeholder, not a query value.
+    expect(shortcutParam("https://x/%s/y?tab=1")).toBeNull();
+  });
+});
+
+describe("shortcutDedupKey", () => {
+  it("path %s: collapses incidental query params (dedup by host+path)", () => {
+    const tpl = "https://war.oklahoma-airflow.grid.linkedin.com/dags/%s/grid";
+    const a = shortcutDedupKey(
+      "https://war.oklahoma-airflow.grid.linkedin.com/dags/sis-x/grid?tab=details&dag_run_id=r1",
+      tpl
+    );
+    const b = shortcutDedupKey(
+      "https://war.oklahoma-airflow.grid.linkedin.com/dags/sis-x/grid?task_id=T&tab=logs",
+      tpl
+    );
+    expect(a).toBe(b); // same dag -> one entry
+    // A different dag stays distinct.
+    const c = shortcutDedupKey(
+      "https://war.oklahoma-airflow.grid.linkedin.com/dags/log-compact/grid",
+      tpl
+    );
+    expect(c).not.toBe(a);
+  });
+
+  it("query %s: dedups by the %s param only, ignoring other params", () => {
+    const tpl = "https://jarvis.corp.linkedin.com/codesearch/results?query=%s";
+    const base = "https://jarvis.corp.linkedin.com/codesearch/results?query=ABC";
+    const k = shortcutDedupKey(base, tpl);
+    expect(shortcutDedupKey(base + "&current=2", tpl)).toBe(k);
+    expect(shortcutDedupKey(base + "&current=2&nresults=10", tpl)).toBe(k);
+    // A different query value is a distinct result.
+    expect(
+      shortcutDedupKey("https://jarvis.corp.linkedin.com/codesearch/results?query=XYZ", tpl)
+    ).not.toBe(k);
+  });
+});
+
+describe("shortcutValue", () => {
+  it("query %s: returns the (decoded) value of that param", () => {
+    const tpl = "https://google.ca/?q=%s";
+    expect(shortcutValue("https://google.ca/?q=hello&blah=1", tpl)).toBe("hello");
+    expect(shortcutValue("https://google.ca/?q=hello%20world", tpl)).toBe("hello world");
+    // Missing param -> null.
+    expect(shortcutValue("https://google.ca/?x=1", tpl)).toBeNull();
+  });
+
+  it("path %s: returns the segment between the fixed prefix and suffix", () => {
+    const tpl = "https://war.grid.linkedin.com/dags/%s/grid";
+    expect(
+      shortcutValue("https://war.grid.linkedin.com/dags/sis-x/grid?tab=details", tpl)
+    ).toBe("sis-x");
+    // A trailing-%s template.
+    expect(shortcutValue("https://go/deploy", "https://go/%s")).toBe("deploy");
+    // Doesn't fit the template -> null.
+    expect(shortcutValue("https://war.grid.linkedin.com/other/x", tpl)).toBeNull();
+  });
+
+  it("returns null when there's no value / not parseable", () => {
+    expect(shortcutValue("https://go/", "https://go/%s")).toBeNull();
+    expect(shortcutValue("not a url", "https://go/%s")).toBeNull();
   });
 });

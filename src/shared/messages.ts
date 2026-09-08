@@ -15,6 +15,7 @@ export const MSG = {
   SWITCH_GROUP: "ARC_SWITCH_GROUP",
   DELETE_GROUP: "ARC_DELETE_GROUP",
   GET_INDEX: "ARC_GET_INDEX",
+  RELOAD_EXTENSION: "ARC_RELOAD_EXTENSION",
 } as const;
 
 export type MessageType = (typeof MSG)[keyof typeof MSG];

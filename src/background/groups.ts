@@ -4,8 +4,9 @@
 // than grouped ones, and Chrome auto-removes a group once its last tab closes.
 import {
   ACTIVE_GROUP_KEY, GROUP_ALARM, GROUP_COLORS,
-  UNGROUPED_EXPIRY_MS, GROUPED_EXPIRY_MS,
+  UNGROUPED_EXPIRY_MS, GROUPED_EXPIRY_MS, WEB_URL,
 } from "../shared/constants";
+import { getSettings, workingElapsedMs, workHoursOf, type WorkHours } from "../shared/settings";
 
 export type GroupColor = `${chrome.tabGroups.Color}`;
 
@@ -40,19 +41,85 @@ export function setActiveGroupId(id: number | null): Promise<void> {
   );
 }
 
+// ---- External-open adopt hint (storage.session) ---------------------------
+// When the browser regains focus (an OS-level "open link" brings it forward),
+// we snapshot the group of the tab that was active at that instant. An external
+// tab created just afterward adopts that group. Ctrl+T / Ctrl+Shift+T happen
+// while the browser is already focused, so they leave no fresh hint and are not
+// moved. Stored in storage.session so it survives a worker restart but clears on
+// browser restart.
+const ADOPT_HINT_KEY = "arcExternalAdopt";
+export const ADOPT_WINDOW_MS = 1500;
+
+export interface AdoptHint {
+  groupId: number | null; // the focused tab's group, or null for the default space
+  at: number;
+}
+
+export function getAdoptHint(): Promise<AdoptHint | null> {
+  return new Promise((resolve) =>
+    chrome.storage.session.get(ADOPT_HINT_KEY, (r) => {
+      void chrome.runtime.lastError;
+      resolve((r && (r[ADOPT_HINT_KEY] as AdoptHint)) || null);
+    })
+  );
+}
+export function setAdoptHint(hint: AdoptHint): Promise<void> {
+  return new Promise((resolve) =>
+    chrome.storage.session.set({ [ADOPT_HINT_KEY]: hint }, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    })
+  );
+}
+
 // ---- Group queries ---------------------------------------------------------
 
 function toInfo(g: chrome.tabGroups.TabGroup): GroupInfo {
   return { groupId: g.id, name: g.title || "Untitled", color: g.color };
 }
 
-// All open tab groups, ordered by id for a stable numbered row.
+// Pure: order tab groups the way they sit in the tab strip — by their earliest
+// tab's position (window, then tab index), falling back to id when a group has
+// no tabs. `chrome.tabGroups.query` returns groups in id (creation) order, which
+// doesn't reflect dragging a group along the strip; this makes the numbered row
+// match what the user sees.
+export function orderGroupsByStrip<T extends { id: number }>(
+  groups: T[],
+  tabs: { groupId?: number; windowId?: number; index?: number }[]
+): T[] {
+  const pos = new Map<number, { windowId: number; index: number }>();
+  for (const t of tabs) {
+    if (t.groupId == null || t.groupId < 0) continue;
+    const w = t.windowId ?? 0;
+    const idx = t.index ?? 0;
+    const cur = pos.get(t.groupId);
+    if (!cur || w < cur.windowId || (w === cur.windowId && idx < cur.index)) {
+      pos.set(t.groupId, { windowId: w, index: idx });
+    }
+  }
+  return groups.slice().sort((a, b) => {
+    const pa = pos.get(a.id);
+    const pb = pos.get(b.id);
+    if (!pa && !pb) return a.id - b.id;
+    if (!pa) return 1;
+    if (!pb) return -1;
+    if (pa.windowId !== pb.windowId) return pa.windowId - pb.windowId;
+    if (pa.index !== pb.index) return pa.index - pb.index;
+    return a.id - b.id;
+  });
+}
+
+// All open tab groups, ordered to match the tab strip (see orderGroupsByStrip).
 export function queryGroups(): Promise<chrome.tabGroups.TabGroup[]> {
   return new Promise((resolve) =>
     chrome.tabGroups.query({}, (groups) => {
       void chrome.runtime.lastError;
-      const list = (groups || []).slice().sort((a, b) => a.id - b.id);
-      resolve(list);
+      const list = (groups || []).slice();
+      chrome.tabs.query({}, (tabs) => {
+        void chrome.runtime.lastError;
+        resolve(orderGroupsByStrip(list, tabs || []));
+      });
     })
   );
 }
@@ -134,6 +201,121 @@ export function addTabToGroup(tab: chrome.tabs.Tab | undefined, groupId: number 
   });
 }
 
+// ---- Extension-created tab tracking ---------------------------------------
+// Tabs the extension itself opens (bar submit, favorite open) must be exempt
+// from the external-open auto-grouper below — the bar already decided their
+// group (or intentionally left them in the default space). onCreated fires
+// before chrome.tabs.create's callback runs, so we guard with BOTH a short time
+// window (covers that race) and an id set (covers the rest of the worker's life).
+const SELF_CREATED = new Set<number>();
+let selfCreateGuardUntil = 0;
+
+function markSelfCreated(id: number) {
+  SELF_CREATED.add(id);
+  setTimeout(() => SELF_CREATED.delete(id), 5000);
+}
+function isSelfCreated(id: number): boolean {
+  return SELF_CREATED.has(id) || Date.now() < selfCreateGuardUntil;
+}
+
+// Opens a tab the extension is responsible for, exempting it from the external-
+// open grouper and (optionally) placing it in `groupId`.
+export function openManagedTab(
+  createProps: chrome.tabs.CreateProperties,
+  groupId?: number
+) {
+  selfCreateGuardUntil = Date.now() + 1500;
+  chrome.tabs.create(createProps, (tab) => {
+    if (chrome.runtime.lastError || !tab || tab.id == null) return;
+    markSelfCreated(tab.id);
+    if (groupId != null) addTabToGroup(tab, groupId);
+  });
+}
+
+// ---- External-open grouping -----------------------------------------------
+
+// On the browser regaining focus, snapshot the currently-active tab's group as
+// the adopt hint. This fires when the OS brings the browser forward to open an
+// external link (right before the new tab is created) and when switching between
+// browser windows. The active tab at that instant is the one you were viewing —
+// its group (or the default space) is where an imminent external tab should go.
+export function onWindowFocusChanged(windowId: number) {
+  if (windowId == null || windowId === chrome.windows.WINDOW_ID_NONE) return;
+  chrome.tabs.query({ active: true, windowId }, (tabs) => {
+    void chrome.runtime.lastError;
+    const t = tabs && tabs[0];
+    const gid =
+      t && t.groupId != null && t.groupId !== TAB_GROUP_ID_NONE ? t.groupId : null;
+    void setAdoptHint({ groupId: gid, at: Date.now() });
+  });
+}
+
+// The subset of a created tab we inspect to classify it.
+export interface CreatedTabInfo {
+  id?: number;
+  openerTabId?: number;
+  active?: boolean;
+  groupId?: number;
+  url?: string;
+  pendingUrl?: string;
+}
+
+// Pure: could this newly-created tab be an "external" open? It must be focused,
+// carry a real web URL, have NO opener (in-page link clicks / window.open are
+// grouped with their source by Chrome), not already be grouped, and not be one
+// we created. Whether it actually gets grouped is further gated on a fresh
+// focus hint (see onTabCreated) so browser-internal opens — Ctrl+T and reopened
+// tabs (Ctrl+Shift+T), which happen while already focused — are left alone.
+export function isExternalOpen(tab: CreatedTabInfo, selfCreated: boolean): boolean {
+  if (!tab || tab.id == null) return false;
+  if (selfCreated) return false;
+  if (tab.openerTabId != null) return false; // in-page link / window.open
+  if (!tab.active) return false; // external opens focus their tab
+  if (tab.groupId != null && tab.groupId !== TAB_GROUP_ID_NONE) return false;
+  const url = tab.pendingUrl || tab.url || "";
+  return WEB_URL.test(url);
+}
+
+// Pure: given the current adopt hint and now, the group an external tab should
+// join — or null to leave it where it is (no fresh hint, or the hint's context
+// was the default space).
+export function adoptTargetFor(hint: AdoptHint | null, now: number): number | null {
+  if (!hint) return null;
+  if (now - hint.at > ADOPT_WINDOW_MS) return null; // no recent focus-from-outside
+  return hint.groupId; // may be null -> stay in the default space
+}
+
+// onCreated handler: move a detected external open into the group the user was
+// viewing when the browser regained focus. The onCreated payload often omits
+// openerTabId (and may lag the URL), so we re-read the tab after a short tick
+// before classifying — otherwise in-page links would be misread as external.
+export function onTabCreated(tab: chrome.tabs.Tab) {
+  if (!tab || tab.id == null) return;
+  const id = tab.id;
+  if (isSelfCreated(id)) return; // fast path: our own bar/favorite tab
+  setTimeout(() => {
+    void adoptIfExternal(id);
+  }, 120);
+}
+
+async function adoptIfExternal(id: number): Promise<void> {
+  const tab = await new Promise<chrome.tabs.Tab | null>((resolve) =>
+    chrome.tabs.get(id, (t) => {
+      void chrome.runtime.lastError;
+      resolve(t || null);
+    })
+  );
+  if (!tab) return;
+  if (!isExternalOpen(tab as CreatedTabInfo, isSelfCreated(id))) return;
+  const target = adoptTargetFor(await getAdoptHint(), Date.now());
+  if (target == null) return; // no fresh external-focus hint, or default space
+  const groups = await queryGroups();
+  if (!groups.some((g) => g.id === target)) return; // group vanished
+  chrome.tabs.group({ tabIds: [id], groupId: target }, () => {
+    void chrome.runtime.lastError; // group may have vanished between checks
+  });
+}
+
 // ---- Alarms / per-tab expiry ----------------------------------------------
 
 export function ensureAlarm() {
@@ -156,10 +338,29 @@ export interface ExpiryTab {
   lastAccessed?: number;
 }
 
+// Inactivity thresholds (ms) for grouped vs ungrouped tabs.
+export interface ExpiryThresholds {
+  groupedMs: number;
+  ungroupedMs: number;
+}
+
 // Pure: which tab ids should be closed for inactivity. A tab in a group expires
-// after 24h idle, an ungrouped tab after 2h. Never closes the active tab, a
-// pinned tab, a tab with unknown last-access, or the sole tab in its window.
-export function expiredTabIds(tabs: ExpiryTab[], now: number): number[] {
+// after `groupedMs` of *working-time* idle, an ungrouped tab after `ungroupedMs`
+// (both default to the built-in constants). Idle time is measured with
+// workingElapsedMs, so hours outside the configured working window (and excluded
+// weekends) don't count. Never closes the active tab, a pinned tab, a tab with
+// unknown last-access, or the sole tab in its window.
+export function expiredTabIds(
+  tabs: ExpiryTab[],
+  now: number,
+  thresholds?: ExpiryThresholds,
+  workHours?: WorkHours
+): number[] {
+  const groupedMs = thresholds ? thresholds.groupedMs : GROUPED_EXPIRY_MS;
+  const ungroupedMs = thresholds ? thresholds.ungroupedMs : UNGROUPED_EXPIRY_MS;
+  // Default: whole-day, weekends counted -> working elapsed == wall-clock elapsed.
+  const wh: WorkHours =
+    workHours || { workStartMin: 0, workEndMin: 0, includeWeekends: true };
   const perWindow: Record<number, number> = {};
   for (const t of tabs) {
     const w = t.windowId ?? -1;
@@ -172,20 +373,29 @@ export function expiredTabIds(tabs: ExpiryTab[], now: number): number[] {
     const last = t.lastAccessed || 0;
     if (!last) continue; // unknown activity -> treat as fresh
     const grouped = t.groupId != null && t.groupId !== TAB_GROUP_ID_NONE;
-    const threshold = grouped ? GROUPED_EXPIRY_MS : UNGROUPED_EXPIRY_MS;
-    if (now - last > threshold) out.push(t.id);
+    const threshold = grouped ? groupedMs : ungroupedMs;
+    if (workingElapsedMs(last, now, wh) > threshold) out.push(t.id);
   }
   return out;
 }
 
-// Every tick: close inactive tabs. Chrome auto-removes any group left empty; we
-// then reconcile a dangling active-group id against the surviving groups.
+// Every tick: close inactive tabs (using the user's configured thresholds and
+// working hours). Chrome auto-removes any group left empty; we then reconcile a
+// dangling active-group id against the surviving groups.
 export async function tickTabs() {
   const now = Date.now();
-  const tabs = await new Promise<chrome.tabs.Tab[]>((resolve) =>
-    chrome.tabs.query({}, (t) => resolve(t || []))
+  const [tabs, settings] = await Promise.all([
+    new Promise<chrome.tabs.Tab[]>((resolve) =>
+      chrome.tabs.query({}, (t) => resolve(t || []))
+    ),
+    getSettings(),
+  ]);
+  const ids = expiredTabIds(
+    tabs as ExpiryTab[],
+    now,
+    { groupedMs: settings.groupedExpiryMs, ungroupedMs: settings.ungroupedExpiryMs },
+    workHoursOf(settings)
   );
-  const ids = expiredTabIds(tabs as ExpiryTab[], now);
   if (ids.length) await closeTabs(ids);
   // Drop the active group if it no longer exists (all its tabs expired).
   const activeId = await getActiveGroupId();

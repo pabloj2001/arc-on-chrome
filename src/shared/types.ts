@@ -30,8 +30,15 @@ export interface HistoryItem {
   visitCount?: number;
 }
 
-// alias -> URL template (contains %s).
-export type Shortcuts = Record<string, string>;
+// A keyword shortcut: the destination URL template (contains %s) plus a
+// human-readable name shown in the pill when the shortcut is armed.
+export interface Shortcut {
+  url: string;
+  name: string;
+}
+
+// alias (the token you type to arm it) -> shortcut.
+export type Shortcuts = Record<string, Shortcut>;
 
 // A saved favorite slot (a URL, or null when empty).
 export type Favorite = string | null;

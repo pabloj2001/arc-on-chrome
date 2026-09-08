@@ -11,6 +11,7 @@ const TAG_LABEL: Record<string, string> = {
   command: "Command",
   domain: "Website",
   search: "Search",
+  suggestion: "Option",
 };
 
 interface Deps { el: HTMLElement | null; items: ResultRow[]; activeIndex: number; onChoose: (i: number) => void; onHover: (i: number) => void; }
@@ -27,10 +28,10 @@ export function renderResults({ el, items, activeIndex, onChoose, onHover }: Dep
     row.className = "result" + (i === activeIndex ? " active" : "");
     row.dataset.type = r.type;
 
-    if (r.type === "command") {
+    if (r.type === "command" || r.type === "suggestion") {
       const ic = document.createElement("div");
       ic.className = "result-ic";
-      ic.textContent = "/";
+      ic.textContent = r.type === "suggestion" ? "›" : "/";
       row.appendChild(ic);
     } else if (r.type === "search") {
       const ic = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -57,11 +58,13 @@ export function renderResults({ el, items, activeIndex, onChoose, onHover }: Dep
     const title = document.createElement("div");
     title.className = "title";
     title.textContent =
-      r.type === "command" || r.type === "search" ? r.title : r.title || r.url;
+      r.type === "command" || r.type === "search" || r.type === "suggestion"
+        ? r.title
+        : r.title || r.url;
     const url = document.createElement("div");
     url.className = "url";
     url.textContent =
-      r.type === "command"
+      r.type === "command" || r.type === "suggestion"
         ? r.subtitle
         : r.type === "search"
         ? r.engineLabel || "Google Search"
@@ -71,7 +74,7 @@ export function renderResults({ el, items, activeIndex, onChoose, onHover }: Dep
 
     const tag = document.createElement("div");
     tag.className = "tag";
-    tag.textContent = TAG_LABEL[r.type] || "History";
+    tag.textContent = r.tag || TAG_LABEL[r.type] || "History";
 
     row.appendChild(meta);
     row.appendChild(tag);

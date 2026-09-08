@@ -14,20 +14,30 @@ test.describe("favorites", () => {
     expect(s.faves.filter((f) => f.empty)).toHaveLength(7);
   });
 
-  test("clicking a favorite whose site is already open switches to that tab (no duplicate)", async ({ page, context, serviceWorker, baseURL }) => {
+  test("clicking a favorite focuses its pinned tab (no duplicate)", async ({ page, context, serviceWorker, baseURL }) => {
+    // A deeper path is already open; the favorite is the base path.
     const existing = await h.openTabAt(context, baseURL + "/foo/bar");
     await page.bringToFront();
     await h.seedSettings(serviceWorker, {
-      // path-prefix favorite matches the deeper open path -> switches, no new tab
       favorites: [baseURL + "/foo", null, null, null, null, null, null, null],
     });
+    // Favorites now mirror to pinned tabs — wait for the pinned /foo tab.
+    await page.waitForTimeout(0);
+    for (let i = 0; i < 30; i++) {
+      const pinned = await serviceWorker.evaluate(
+        () => new Promise((r) => chrome.tabs.query({ pinned: true }, (t) => r(t.map((x) => x.url || x.pendingUrl || ""))))
+      );
+      if (pinned.some((u) => u.includes("/foo"))) break;
+      await h.sleep(100);
+    }
     const before = await h.tabCount(serviceWorker);
     await h.openBarOn(page, serviceWorker);
     await page.locator(".fave").first().click();
     await h.sleep(400);
+    // Clicking focuses the favorite's (pinned) tab — no new tab is created.
     expect(await h.tabCount(serviceWorker)).toBe(before);
     const active = await h.activeTab(serviceWorker);
-    expect(active.url).toContain("/foo/bar");
+    expect(active.url).toContain("/foo");
     await existing.close().catch(() => {});
   });
 

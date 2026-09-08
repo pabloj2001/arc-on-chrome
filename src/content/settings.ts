@@ -3,6 +3,7 @@
 // clipboard/file plumbing stays in the content entry; this is just the data.
 import { FAV_COUNT, EXPORT_VERSION } from "../shared/constants";
 import type { Favorite, Shortcuts } from "../shared/types";
+import { normalizeShortcuts } from "../shared/shortcuts";
 import type { SettingsImport } from "./commands/types";
 
 // Pads/truncates a stored favorites array to exactly FAV_COUNT slots (null = empty).
@@ -46,7 +47,9 @@ export function parseSettingsImport(text: string): SettingsImport | null {
     ? normalizeFavArray(data.favorites)
     : null;
   const shorts =
-    data.shortcuts && typeof data.shortcuts === "object" ? data.shortcuts : null;
+    data.shortcuts && typeof data.shortcuts === "object"
+      ? normalizeShortcuts(data.shortcuts)
+      : null;
   if (!favs && !shorts) return null;
   return { favorites: favs, shortcuts: shorts };
 }

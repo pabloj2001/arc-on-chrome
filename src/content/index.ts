@@ -2,10 +2,14 @@ import {
   STORAGE_KEY, SHORTCUTS_KEY, FAV_COUNT, MAX_RESULTS,
 } from "../shared/constants";
 import {
-  normalizeUrl, buildUrl, applyShortcut, canon, hostPath,
-  looksLikeNavigable, isSafeNavigationUrl,
+  normalizeUrl, buildUrl, applyShortcut, canon, hostPath, shortcutDedupKey, shortcutValue,
+  looksLikeNavigable, isSafeNavigationUrl, faviconUrl, originOf,
 } from "../shared/url";
 import { MSG } from "../shared/messages";
+import {
+  getSettings, setSettings, applySettingValue,
+} from "../shared/settings";
+import { normalizeShortcuts } from "../shared/shortcuts";
 import {
   normalizeFavArray, buildSettingsExport, parseSettingsImport,
 } from "./settings";
@@ -24,6 +28,7 @@ import { renderResults as renderResultsView } from "./ui/render-results";
 import { renderGroup as renderGroupView } from "./ui/render-group";
 import { renderGroupsRow as renderGroupsRowView } from "./ui/render-groups-row";
 import { renderCommandChips as renderCommandChipsView } from "./ui/render-command-chips";
+import { openSettingsModal } from "./ui/settings-modal";
 import type { Favorite, Shortcuts, TabItem, HistoryItem } from "../shared/types";
 import type { CommandCtx } from "./commands/types";
 import type { ResultRow, CommandState, GroupInfo } from "./ui/types";
@@ -88,7 +93,7 @@ declare global {
       favorites = normalizeFavArray(res[STORAGE_KEY]);
     }
     if (res && res[SHORTCUTS_KEY] && typeof res[SHORTCUTS_KEY] === "object") {
-      shortcuts = res[SHORTCUTS_KEY] as Shortcuts;
+      shortcuts = normalizeShortcuts(res[SHORTCUTS_KEY]);
     }
     if (isOpen) renderFavorites();
   });
@@ -101,7 +106,7 @@ declare global {
       if (isOpen) renderFavorites();
     }
     if (changes[SHORTCUTS_KEY]) {
-      shortcuts = (changes[SHORTCUTS_KEY].newValue || {}) as Shortcuts;
+      shortcuts = normalizeShortcuts(changes[SHORTCUTS_KEY].newValue || {});
     }
   });
 
@@ -185,8 +190,8 @@ declare global {
         saveFavorites();
         renderFavorites();
       },
-      setShortcut: (alias: string, url: string) => {
-        shortcuts[alias] = url;
+      setShortcut: (alias: string, url: string, name: string) => {
+        shortcuts[alias] = { url, name: name || alias };
         saveShortcuts();
       },
       removeShortcut: (alias: string) => {
@@ -288,6 +293,49 @@ declare global {
           }
         );
       },
+      openSettings: () => {
+        close(); // the /settings modal replaces the bar
+        getSettings().then((settings) => {
+          openSettingsModal({
+            settings,
+            onSave: (next) => {
+              void setSettings(next);
+            },
+            shortcuts: { ...shortcuts },
+            onSaveShortcut: (alias, shortcut, prevAlias) => {
+              if (prevAlias && prevAlias !== alias) delete shortcuts[prevAlias];
+              shortcuts[alias] = shortcut;
+              void saveShortcuts();
+            },
+            onRemoveShortcut: (alias) => {
+              delete shortcuts[alias];
+              void saveShortcuts();
+            },
+          });
+        });
+      },
+      setSetting: (token: string, value: string) => {
+        getSettings().then((cur) => {
+          const res = applySettingValue(cur, token, value);
+          if (res.ok && res.settings) {
+            setSettings(res.settings).then(() => status(res.message || "Saved"));
+          } else {
+            status(res.error || "Couldn't update setting");
+          }
+        });
+      },
+      reload: () => {
+        chrome.runtime.sendMessage({ type: MSG.RELOAD_EXTENSION }, () => {
+          void chrome.runtime.lastError; // the worker tears down as it reloads
+        });
+        close();
+      },
+      listShortcuts: () => Object.keys(shortcuts).sort(),
+      listGroups: () => groupsList.map((g) => ({ name: g.name })),
+      listFavorites: () =>
+        favorites
+          .map((url, i) => ({ index: i + 1, url: url || "" }))
+          .filter((f) => !!f.url),
       close,
       clearInput: () => {
         if (input) input.value = "";
@@ -508,10 +556,13 @@ declare global {
   // ---- Shortcut pill ---------------------------------------------------------
 
   function renderPill() {
+    const sc = activeShortcut ? shortcuts[activeShortcut] : null;
     renderPillView({
       pill: pillEl,
       input,
       activeShortcut,
+      shortcutName: sc ? sc.name : null,
+      shortcutIcon: sc ? faviconUrl(originOf(sc.url) || sc.url) : null,
       commandState,
       opensInCurrentTab,
     });
@@ -623,8 +674,36 @@ declare global {
   // No shortcut: empty query -> other open tabs; typing -> title/url matches in
   // open tabs then history. With a shortcut pill active: restrict to tabs/history
   // under the shortcut's destination URL (and further narrow by the typed query).
+
+  // While filling a command param, a command may offer value suggestions (e.g.
+  // /unshortcut lists aliases, /settings lists setting names). Filtered by what's
+  // typed into the active param; empty otherwise.
+  function computeSuggestions(): ResultRow[] {
+    if (!commandState) return [];
+    const cmd = COMMANDS[commandState.name];
+    if (!cmd || !cmd.suggest) return [];
+    const current = input ? input.value : "";
+    const list = cmd.suggest(commandState.index, current, commandCtx()) || [];
+    const q = current.trim().toLowerCase();
+    const filtered = q
+      ? list.filter(
+          (s) =>
+            s.value.toLowerCase().includes(q) ||
+            s.label.toLowerCase().includes(q)
+        )
+      : list;
+    return filtered.slice(0, MAX_RESULTS).map((s) => ({
+      type: "suggestion",
+      name: s.value,
+      title: s.label,
+      subtitle: s.description || "",
+      tag: s.tag,
+      run: s.run,
+    }));
+  }
+
   function computeResults(): ResultRow[] {
-    if (commandState) return [];
+    if (commandState) return computeSuggestions();
     const raw = input ? input.value : "";
 
     // Command palette: typing "/" lists matching commands.
@@ -648,12 +727,17 @@ declare global {
 
     let base = null;
     if (activeShortcut) {
-      base = templateBase(shortcuts[activeShortcut]);
+      base = templateBase(shortcuts[activeShortcut].url);
       if (!base) return [];
     }
     const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const out: ResultRow[] = [];
     const seen = new Set<string>();
+    // With a shortcut active, collapse results by the value `%s` fills so the
+    // many incidental-param variants a template surfaces don't crowd out the
+    // genuinely distinct destinations; otherwise use the normal canonical key.
+    const keyOf = (url: string) =>
+      activeShortcut ? shortcutDedupKey(url, shortcuts[activeShortcut].url) : canon(url);
 
     // Top result: a website to visit. Prefer a visited domain we can autocomplete
     // to (so "linkedin.c" suggests the known "linkedin.com", matching the ghost);
@@ -678,26 +762,38 @@ declare global {
       }
     }
 
+    // With a shortcut active, title each result with the value `%s` would hold to
+    // reach it (what you'd type after the alias) instead of the page title, so a
+    // row like "google.ca/?q=hello&x=1" reads simply as "hello".
+    const tpl = activeShortcut ? shortcuts[activeShortcut].url : null;
+    const titleFor = (url: string, fallback?: string) => {
+      if (tpl) {
+        const v = shortcutValue(url, tpl);
+        if (v) return v;
+      }
+      return fallback || url;
+    };
+
     for (const t of openTabs) {
       if (t.tabId === currentTabId) continue;
       if (base && !underBase(t.url, base)) continue;
       if (tokens.length && !matchesQuery(t, tokens)) continue;
-      const c = canon(t.url);
+      const c = keyOf(t.url);
       if (seen.has(c)) continue;
       seen.add(c);
-      out.push({ type: "tab", title: t.title, url: t.url, tabId: t.tabId, windowId: t.windowId });
+      out.push({ type: "tab", title: titleFor(t.url, t.title), url: t.url, tabId: t.tabId, windowId: t.windowId });
       if (out.length >= MAX_RESULTS) break;
     }
 
     // Include history when there's a query, or a shortcut base to browse under.
     if (out.length < MAX_RESULTS && (tokens.length || base)) {
       for (const h of historyItems) {
-        const c = canon(h.url);
+        const c = keyOf(h.url);
         if (seen.has(c)) continue;
         if (base && !underBase(h.url, base)) continue;
         if (tokens.length && !matchesQuery(h, tokens)) continue;
         seen.add(c);
-        out.push({ type: "history", title: h.title, url: h.url });
+        out.push({ type: "history", title: titleFor(h.url, h.title), url: h.url });
         if (out.length >= MAX_RESULTS) break;
       }
     }
@@ -712,9 +808,9 @@ declare global {
         ? {
             type: "search",
             term,
-            title: `Search “${activeShortcut}” for “${term}”`,
-            engineLabel: templateBase(shortcuts[activeShortcut]).host,
-            url: applyShortcut(shortcuts[activeShortcut], term),
+            title: `Search “${shortcuts[activeShortcut].name}” for “${term}”`,
+            engineLabel: templateBase(shortcuts[activeShortcut].url).host,
+            url: applyShortcut(shortcuts[activeShortcut].url, term),
           }
         : {
             type: "search",
@@ -773,9 +869,12 @@ declare global {
   }
 
   // Mirror the highlighted suggestion's URL into the bar (omnibox-style). When
-  // nothing is highlighted, restore the user's typed text and the ghost.
+  // nothing is highlighted, restore the user's typed text and the ghost. In
+  // command param mode the input belongs to the active param, so previewing does
+  // nothing (arrowing just moves the highlight; choosing fills the param).
   function previewSelection() {
     if (!input) return;
+    if (commandState) return;
     if (activeIndex < 0) {
       navigating = false;
       input.value = typedQuery;
@@ -804,6 +903,22 @@ declare global {
     if (r.type === "command") {
       // Remember the typed text (e.g. "/fav") to restore on backspace-out.
       enterCommandMode(r.name, "", input ? input.value : "");
+      return;
+    }
+    if (r.type === "suggestion") {
+      if (!commandState || !input) return;
+      // Fill the active param with the suggestion's value.
+      input.value = r.name || "";
+      commandState.values[commandState.index] = r.name || "";
+      const isLast = commandState.index >= commandState.params.length - 1;
+      if (r.run || isLast) {
+        runCommandStructured();
+      } else {
+        advanceParam();
+        activeIndex = -1;
+        refreshResults();
+        input.focus();
+      }
       return;
     }
     close();
@@ -841,7 +956,11 @@ declare global {
     }
   }
 
-  function loadIndex() {
+  // `adoptCurrentTabGroup` (set on open) makes the active group follow the tab
+  // you're viewing; mid-session refreshes (after /group or /deletegroup) pass
+  // false and keep the group those handlers just set, since `sender.tab`'s group
+  // snapshot is stale right after a regrouping.
+  function loadIndex(adoptCurrentTabGroup?: boolean) {
     chrome.runtime.sendMessage({ type: MSG.GET_INDEX }, (res) => {
       if (chrome.runtime.lastError || !res) return;
       openTabs = res.tabs || [];
@@ -849,15 +968,19 @@ declare global {
       currentTabId = res.currentTabId != null ? res.currentTabId : null;
       currentTabGroupId =
         res.currentTabGroupId != null ? res.currentTabGroupId : -1;
-      activeGroup = res.activeGroup || null;
       groupsList = res.groups || [];
-      // cmd+L acts on the current tab, so show the group that tab actually
-      // lives in (a different group than the selected group, or default when
-      // the tab isn't in a group) rather than the globally-active one.
-      if (opensInCurrentTab) {
+      // Opening the bar adopts the group of the tab you're viewing: if the
+      // current tab lives in a group, that becomes the active group (so tabs you
+      // open from the bar join it); an ungrouped tab means the default space.
+      // This overrides the globally-stored active group. The temporary-exit flag
+      // is left untouched here — applyInitialState resets it on each fresh open,
+      // so a mid-session refresh (e.g. a storage change) won't undo a ←/Backspace
+      // exit.
+      if (adoptCurrentTabGroup) {
         activeGroup =
           groupsList.find((c) => c.groupId === currentTabGroupId) || null;
-        groupTemporarilyExited = false;
+      } else {
+        activeGroup = res.activeGroup || null;
       }
       buildDomainScores();
       if (isOpen) {
@@ -952,13 +1075,30 @@ declare global {
       if (e.key === "Tab") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        advanceParam();
+        // Tab picks the highlighted suggestion (fills the param) if any, else
+        // advances to the next param.
+        if (activeIndex >= 0 && results[activeIndex]) chooseResult(activeIndex);
+        else advanceParam();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        moveSelection(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        moveSelection(-1);
         return;
       }
       if (e.key === "Enter") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        runCommandStructured();
+        // A highlighted suggestion wins; otherwise run with the typed values.
+        if (activeIndex >= 0 && results[activeIndex]) chooseResult(activeIndex);
+        else runCommandStructured();
         return;
       }
       if (e.key === "Escape") {
@@ -1165,8 +1305,10 @@ declare global {
     }
     const groupId = dispatchGroupId();
     close();
-    // Switch to an existing tab with this URL if one is open, else new tab.
-    chrome.runtime.sendMessage({ type: MSG.OPEN_FAVORITE, url, groupId });
+    // With pinning on, favorites are pinned tabs aligned to the favorite slots,
+    // so just focus the Nth pinned tab (index i) — its URL may have drifted.
+    // Falls back to URL match/create when this window has no such pinned slot.
+    chrome.runtime.sendMessage({ type: MSG.OPEN_FAVORITE, url, groupId, index: i });
   }
 
   function renderFavorites() {
@@ -1222,7 +1364,7 @@ declare global {
 
     applyInitialState();
     renderFavorites();
-    loadIndex();
+    loadIndex(true); // adopt the current tab's group on open
 
     // Clicking the backdrop closes; clicking anything else inside keeps input
     // focus (so favorite buttons work without the blur-close firing first).
@@ -1236,9 +1378,13 @@ declare global {
 
     input.addEventListener("blur", onFocusOut);
     input.addEventListener("input", () => {
-      // Command param mode: keep the active-param pill sized to its content.
+      // Command param mode: keep the active-param pill sized to its content and
+      // refresh any value suggestions as the user types (no auto-highlight, so
+      // Enter still runs with the typed value unless a suggestion is chosen).
       if (commandState) {
         updateParamInputWidth();
+        activeIndex = -1;
+        refreshResults();
         return;
       }
       const v = input.value;
@@ -1247,11 +1393,14 @@ declare global {
 
       // Enter command param mode when a full/prefix command name is followed by
       // a space (e.g. "/favorite " or "/fav " -> autocompletes to /favorite).
+      // Only for commands that declare params; a no-param command (e.g. /settings
+      // or /export) keeps the raw text so inline args like "/settings x y" reach
+      // runCommand on Enter instead of the command firing on the first space.
       if (!activeShortcut) {
         const cm = v.match(/^\/(\w+)\s([\s\S]*)$/);
         if (cm) {
           const name = COMMANDS[cm[1]] ? cm[1] : bestCommandByPrefix(cm[1]);
-          if (name) {
+          if (name && COMMANDS[name].params && COMMANDS[name].params.length) {
             enterCommandMode(name, cm[2], "/" + cm[1]);
             return;
           }
@@ -1347,7 +1496,7 @@ declare global {
   function submit() {
     // Active shortcut pill: substitute the query into the template.
     if (activeShortcut) {
-      const url = applyShortcut(shortcuts[activeShortcut], input.value);
+      const url = applyShortcut(shortcuts[activeShortcut].url, input.value);
       if (url) dispatch(url);
       else close();
       return;

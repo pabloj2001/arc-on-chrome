@@ -2,10 +2,11 @@
 // Returns true for handlers that reply asynchronously (keeps the channel open).
 import { MSG } from "../shared/messages";
 import { isSafeNavigationUrl } from "../shared/url";
-import { focusOrCreateTab } from "./favorites";
+import { getSettings } from "../shared/settings";
+import { focusOrCreateTab, focusFavoriteByIndex } from "./favorites";
 import { getIndex } from "./index-builder";
 import {
-  addTabToGroup, createGroup, clearActiveGroup, switchGroup, deleteGroup,
+  openManagedTab, createGroup, clearActiveGroup, switchGroup, deleteGroup,
 } from "./groups";
 
 export function onMessage(message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void) {
@@ -13,15 +14,29 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
   switch (message.type) {
     case MSG.SEARCH_SUBMIT:
       if (message.url && isSafeNavigationUrl(message.url)) {
-        chrome.tabs.create({ url: message.url }, (tab) => {
-          if (chrome.runtime.lastError) return; // navigation rejected
-          addTabToGroup(tab, message.groupId);
-        });
+        // Managed create: exempt from the external-open grouper and placed in
+        // the bar's chosen group (message.groupId), or the default space when none.
+        openManagedTab({ url: message.url }, message.groupId);
       }
       break;
     case MSG.OPEN_FAVORITE:
       if (message.url && isSafeNavigationUrl(message.url)) {
-        focusOrCreateTab(message.url, message.groupId);
+        // With pinning on, favorites live as pinned tabs aligned to the favorite
+        // slots — focus the Nth pinned tab by position (its URL may have drifted),
+        // falling back to URL match/create. With pinning off, open a new tab.
+        getSettings().then((s) => {
+          if (!s.pinFavorites) {
+            openManagedTab({ url: message.url }, message.groupId);
+          } else if (typeof message.index === "number") {
+            const winId = sender.tab ? sender.tab.windowId : undefined;
+            focusFavoriteByIndex(message.index, message.url, winId, message.groupId, {
+              enabled: s.resetStaleFavorites,
+              staleMs: s.staleFavoriteMs,
+            });
+          } else {
+            focusOrCreateTab(message.url, message.groupId);
+          }
+        });
       }
       break;
     case MSG.ACTIVATE_TAB:
@@ -47,5 +62,8 @@ export function onMessage(message: any, sender: chrome.runtime.MessageSender, se
     case MSG.GET_INDEX:
       getIndex(sender, sendResponse);
       return true; // keep the message channel open for the async response
+    case MSG.RELOAD_EXTENSION:
+      chrome.runtime.reload();
+      break;
   }
 }

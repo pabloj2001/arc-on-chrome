@@ -23,12 +23,17 @@
 .icon.clickable { pointer-events: auto; cursor: pointer; }
 .icon.clickable:hover { opacity: 0.8 !important; }
 .pill {
-  flex: 0 0 auto; display: none; align-items: center;
+  flex: 0 0 auto; display: none; align-items: center; gap: 7px;
   height: 28px; padding: 0 12px; border-radius: 9px;
   background: #4b6cff; color: #fff; cursor: pointer;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 16px; font-weight: 600; line-height: 28px; white-space: nowrap;
 }
+.pill .pill-icon {
+  width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto;
+  background: rgba(255,255,255,0.9);
+}
+.pill .pill-label { flex: 0 0 auto; }
 .chips { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .cmd-chips { display: none; align-items: center; gap: 8px; }
 .cmd-pill {
@@ -86,11 +91,12 @@ input::placeholder { color: #9a9aa2; }
 .result-ic-svg { width: 18px; height: 18px; flex: 0 0 auto; color: #8a8a90; }
 .faves { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .contexts-row {
-  display: none; gap: 8px; justify-content: center; flex-wrap: wrap;
+  display: none; gap: 8px; justify-content: center; flex-wrap: nowrap;
+  min-width: 0;
 }
 .ctx-chip {
   all: unset; box-sizing: border-box; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   height: 30px; padding: 0 12px; border-radius: 10px; color: #fff;
   background: #4b6cff; opacity: 0.82;
   box-shadow: 0 6px 18px rgba(0,0,0,0.22);
@@ -103,17 +109,44 @@ input::placeholder { color: #9a9aa2; }
 .ctx-chip.ctx-default {
   background: rgba(120,120,128,0.9); color: #fff;
 }
-.ctx-chip.ctx-default.active { box-shadow: 0 6px 18px rgba(0,0,0,0.28), 0 0 0 2px #4b6cff; }
+.ctx-chip.ctx-default.active { box-shadow: 0 6px 18px rgba(0,0,0,0.28), 0 0 0 2px #fff; }
 .ctx-chip.ctx-add {
-  background: #fff; color: #6a6a70;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.22);
-  font-size: 20px; font-weight: 500; line-height: 1; padding: 0 12px;
+  background: #fff; color: #6a6a70; flex: 0 0 auto;
+  justify-content: center; box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+  font-size: 20px; font-weight: 500; line-height: 0; padding: 0 12px;
 }
 .ctx-chip.ctx-add:hover { background: #f2f2f4; color: #3a3a40; }
 .ctx-chip .ctx-num {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
   min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px;
   background: rgba(255,255,255,0.28); font-size: 11px; font-weight: 700;
+}
+.ctx-chip .ctx-cname {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; max-width: 160px;
+}
+/* Small "Ctrl +" hint before the chips, revealed only while the row is hovered
+   (kept in layout so the chips don't shift — it just fades in/out). */
+.ctx-hint {
+  align-self: center; flex: 0 0 auto; white-space: nowrap;
+  color: rgba(255,255,255,0.78); font-size: 12px; font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0.2px; margin-right: 2px; user-select: none; pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  opacity: 0; transition: opacity 130ms ease;
+}
+.contexts-row:hover .ctx-hint { opacity: 1; }
+/* Collapsed row (3+ groups): every chip's name is collapsed by default and
+   slides open (max-width + opacity) when the chip is active or hovered — so
+   selecting/deselecting (incl. Ctrl+N) animates in and reverses out. The
+   negative margin cancels the flex gap while the name is collapsed. */
+.contexts-row.ctx-collapsed .ctx-chip .ctx-cname {
+  max-width: 0; opacity: 0; margin-left: -6px;
+  transition: max-width 220ms ease, opacity 160ms ease, margin-left 220ms ease;
+}
+.contexts-row.ctx-collapsed .ctx-chip.active .ctx-cname,
+.contexts-row.ctx-collapsed .ctx-chip:not(.active):hover .ctx-cname {
+  max-width: 160px; opacity: 1; margin-left: 0;
 }
 .fave {
   all: unset; box-sizing: border-box; position: relative;

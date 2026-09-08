@@ -16,7 +16,7 @@ describe("normalizeFavArray", () => {
 
 describe("buildSettingsExport / parseSettingsImport round-trip", () => {
   const favorites = ["https://github.com", null, null, null, null, null, null, null];
-  const shortcuts = { gh: "https://github.com/search?q=%s" };
+  const shortcuts = { gh: { url: "https://github.com/search?q=%s", name: "GitHub" } };
 
   it("round-trips favorites + shortcuts", () => {
     const json = buildSettingsExport(favorites, shortcuts);
@@ -25,7 +25,7 @@ describe("buildSettingsExport / parseSettingsImport round-trip", () => {
     expect(parsed.shortcuts).toEqual(shortcuts);
     const data = JSON.parse(json);
     expect(data.type).toBe("arc-search-settings");
-    expect(data.version).toBe(1);
+    expect(data.version).toBe(2);
   });
 
   it("rejects bad type, bad JSON, and future versions", () => {
@@ -38,9 +38,20 @@ describe("buildSettingsExport / parseSettingsImport round-trip", () => {
 
   it("accepts a partial blob (shortcuts only)", () => {
     const parsed = parseSettingsImport(
-      JSON.stringify({ type: "arc-search-settings", version: 1, shortcuts })
+      JSON.stringify({ type: "arc-search-settings", version: 2, shortcuts })
     );
     expect(parsed.favorites).toBeNull();
     expect(parsed.shortcuts).toEqual(shortcuts);
+  });
+
+  it("upgrades legacy string shortcuts (name defaults to the alias)", () => {
+    const parsed = parseSettingsImport(
+      JSON.stringify({
+        type: "arc-search-settings",
+        version: 1,
+        shortcuts: { go: "https://go/%s" },
+      })
+    );
+    expect(parsed.shortcuts).toEqual({ go: { url: "https://go/%s", name: "go" } });
   });
 });

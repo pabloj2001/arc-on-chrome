@@ -55,4 +55,143 @@ describe("expiredTabIds", () => {
     // window 1 has 2 tabs -> tab 1 expires; window 2 has only tab 3 -> protected
     expect(expiredTabIds([staleA, freshA, loneB], now)).toEqual([1]);
   });
+
+  it("honors custom thresholds from settings", () => {
+    // 10-minute grouped / 5-minute ungrouped windows
+    const thresholds = { groupedMs: 10 * 60000, ungroupedMs: 5 * 60000 };
+    const grouped = tab({ id: 1, groupId: 5, lastAccessed: now - 6 * 60000 }); // <10m -> survives
+    const ungrouped = tab({ id: 2, lastAccessed: now - 6 * 60000 }); // >5m -> expires
+    expect(expiredTabIds([grouped, ungrouped], now, thresholds)).toEqual([2]);
+    // With longer thresholds neither expires
+    const relaxed = { groupedMs: GROUPED_EXPIRY_MS, ungroupedMs: UNGROUPED_EXPIRY_MS };
+    expect(expiredTabIds([grouped, ungrouped], now, relaxed)).toEqual([]);
+  });
+});
+
+import { isExternalOpen } from "../../src/background/groups";
+
+describe("isExternalOpen", () => {
+  const base = {
+    id: 42,
+    active: true,
+    groupId: -1,
+    pendingUrl: "https://example.com/",
+  };
+
+  it("accepts a focused, ungrouped, opener-less web tab we didn't create", () => {
+    expect(isExternalOpen(base, false)).toBe(true);
+    expect(isExternalOpen({ id: 1, active: true, groupId: -1, url: "http://x.com" }, false)).toBe(true);
+  });
+
+  it("rejects tabs the extension created itself", () => {
+    expect(isExternalOpen(base, true)).toBe(false);
+  });
+
+  it("rejects in-page links / window.open (they carry an openerTabId)", () => {
+    expect(isExternalOpen({ ...base, openerTabId: 7 }, false)).toBe(false);
+  });
+
+  it("rejects background (non-active) tabs — e.g. session restore", () => {
+    expect(isExternalOpen({ ...base, active: false }, false)).toBe(false);
+  });
+
+  it("rejects tabs already in a group", () => {
+    expect(isExternalOpen({ ...base, groupId: 5 }, false)).toBe(false);
+  });
+
+  it("rejects non-web tabs (new-tab page, extension pages)", () => {
+    expect(isExternalOpen({ ...base, pendingUrl: "", url: "edge://newtab/" }, false)).toBe(false);
+    expect(isExternalOpen({ ...base, pendingUrl: "about:blank", url: "" }, false)).toBe(false);
+    expect(isExternalOpen({ id: 1, active: true, groupId: -1 }, false)).toBe(false);
+  });
+});
+
+import { adoptTargetFor, ADOPT_WINDOW_MS } from "../../src/background/groups";
+
+describe("adoptTargetFor", () => {
+  const t = 1_000_000;
+  it("returns null with no hint", () => {
+    expect(adoptTargetFor(null, t)).toBeNull();
+  });
+  it("returns the hinted group when the hint is fresh", () => {
+    expect(adoptTargetFor({ groupId: 9, at: t }, t + 100)).toBe(9);
+    expect(adoptTargetFor({ groupId: 9, at: t }, t + ADOPT_WINDOW_MS - 1)).toBe(9);
+  });
+  it("returns null when the hint is stale (no recent focus-from-outside)", () => {
+    expect(adoptTargetFor({ groupId: 9, at: t }, t + ADOPT_WINDOW_MS + 1)).toBeNull();
+  });
+  it("returns null when the hinted context was the default space", () => {
+    expect(adoptTargetFor({ groupId: null, at: t }, t + 100)).toBeNull();
+  });
+});
+
+describe("expiredTabIds with working hours", () => {
+  const HOUR = 3600000;
+  const work = { workStartMin: 540, workEndMin: 1020, includeWeekends: true }; // 9–17
+  // "now" = Monday 10:00; a tab last active Friday 16:00.
+  const now = new Date(2024, 0, 8, 10, 0, 0, 0).getTime(); // Mon
+  const friday16 = new Date(2024, 0, 5, 16, 0, 0, 0).getTime();
+
+  it("does not expire a tab whose idle time is mostly after-hours/weekend", () => {
+    const thresholds = { groupedMs: 24 * HOUR, ungroupedMs: 2 * HOUR };
+    const noWeekend = { ...work, includeWeekends: false };
+    // Working time Fri16->Mon10 (weekends excluded) = 2h, which is NOT > 2h ungrouped.
+    const t = tab({ id: 1, groupId: NONE, lastAccessed: friday16 });
+    const filler = tab({ id: 2, lastAccessed: now });
+    expect(expiredTabIds([t, filler], now, thresholds, noWeekend)).toEqual([]);
+  });
+
+  it("expires once enough working time has accrued", () => {
+    const thresholds = { groupedMs: 24 * HOUR, ungroupedMs: 1 * HOUR };
+    const noWeekend = { ...work, includeWeekends: false };
+    // 2h working time > 1h ungrouped threshold -> expires.
+    const t = tab({ id: 1, groupId: NONE, lastAccessed: friday16 });
+    const filler = tab({ id: 2, lastAccessed: now });
+    expect(expiredTabIds([t, filler], now, thresholds, noWeekend)).toEqual([1]);
+  });
+});
+
+import { orderGroupsByStrip } from "../../src/background/groups";
+
+describe("orderGroupsByStrip", () => {
+  const g = (id) => ({ id });
+
+  it("orders groups by their earliest tab's index (not by id)", () => {
+    // Group 10 sits later in the strip than group 20 (index 5 vs 1).
+    const groups = [g(10), g(20)];
+    const tabs = [
+      { groupId: 20, windowId: 1, index: 1 },
+      { groupId: 20, windowId: 1, index: 2 },
+      { groupId: 10, windowId: 1, index: 5 },
+    ];
+    expect(orderGroupsByStrip(groups, tabs).map((x) => x.id)).toEqual([20, 10]);
+  });
+
+  it("orders across windows by windowId then index", () => {
+    const groups = [g(1), g(2), g(3)];
+    const tabs = [
+      { groupId: 3, windowId: 2, index: 0 },
+      { groupId: 1, windowId: 1, index: 3 },
+      { groupId: 2, windowId: 1, index: 0 },
+    ];
+    // window 1 (grp2 idx0, grp1 idx3) then window 2 (grp3).
+    expect(orderGroupsByStrip(groups, tabs).map((x) => x.id)).toEqual([2, 1, 3]);
+  });
+
+  it("ignores ungrouped tabs and falls back to id for tab-less groups", () => {
+    const groups = [g(7), g(9)];
+    const tabs = [
+      { groupId: -1, windowId: 1, index: 0 }, // ungrouped, ignored
+      { groupId: 9, windowId: 1, index: 4 },
+      // group 7 has no tabs -> sorts after, by id
+    ];
+    expect(orderGroupsByStrip(groups, tabs).map((x) => x.id)).toEqual([9, 7]);
+  });
+
+  it("does not mutate the input array", () => {
+    const groups = [g(3), g(1)];
+    const copy = groups.slice();
+    orderGroupsByStrip(groups, [{ groupId: 1, windowId: 1, index: 0 }]);
+    expect(groups).toEqual(copy);
+  });
 });
